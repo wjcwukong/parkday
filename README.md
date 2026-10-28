@@ -7,7 +7,11 @@ The header stars Lumi, a little 3D lantern spirit rendered live with [Flutter Sc
 
 - **Lumi** is built from primitives with a custom glass material (`assets/materials/lumi_glass.fmat`).
   It blinks, follows your finger with its eyes and changes expression.
-  - Notifications slide in, and Lumi gulps them down and tells you what they said.
+  - Notifications fly in as cards in the 3D scene (`lib/scene/note_card.dart`). Lumi catches one,
+    tips it up to its mouth and swallows it whole, then tells you what it said.
+  - Tap the "Parkday" wordmark and the whole page tips back into perspective: the feed cards stand up
+    as slabs and Lumi glides over them, lighting each one up. The scene camera swings by the same
+    transform as the widgets, so the 3D and the UI stay in register.
   - Pet Lumi slowly and it blushes, gets sleepy and falls asleep. Tap to wake it.
   - Shake it too fast and it gets dizzy. Tap it for a bounce.
   - Scroll the feed and Lumi rides the scrollbar.
@@ -20,7 +24,9 @@ The header stars Lumi, a little 3D lantern spirit rendered live with [Flutter Sc
   (motion is a function of time, so scrubbing is free). The lagoon mirrors the scene with a planar
   reflector and `lagoon.fmat`, with bloom, purple haze and depth of field on the close shots.
 - **Lumi's room**: an orbitable floating island room. Tap a hat to wear it, or tap the cushion for a nap.
-- **Park map**: a 3D island with live waits. Lumi hops over to the ride with the shortest wait.
+- **Park map**: a 3D island with live waits. Each ride's wait tag is the real Flutter widget on a card in
+  the scene (Flutter Scene's `WidgetComponent`), so it sits in perspective and hides behind the rides.
+  Tap a tag and Lumi hops over.
 - **Games**: Star Catch (45 seconds of falling stars) and Sky Lift (float as high as you can, up to the moon).
 
 ## Running
@@ -42,7 +48,9 @@ For a native release build, pass `--enable-flutter-gpu` too, or set `FLTEnableFl
 
 ## Layout
 
-- `lib/scene/` holds the 3D rig for Lumi and friends, the spark effects, and the screen-to-world mapping.
-- `lib/lumi/lumi_brain.dart` holds Lumi's behaviour: petting, sleep, notifications, riding and speech.
+- `lib/scene/` holds the 3D rig for Lumi and friends, the spark effects, note cards, and the
+  screen-to-world mapping.
+- `lib/lumi/lumi_brain.dart` holds Lumi's behaviour: petting, sleep, notifications, the page fly-over,
+  riding and speech.
 - `lib/home/` holds the home page, feed cards and wardrobe.
 - `lib/screens/` holds the fireworks show, room, park map and games.

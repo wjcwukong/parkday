@@ -26,10 +26,8 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   final brain = LumiBrain();
-  late final AnimationController clock = AnimationController(
-    vsync: this,
-    duration: const Duration(seconds: 60),
-  )..repeat();
+  late final AnimationController clock = AnimationController(vsync: this, duration: const Duration(seconds: 60))
+    ..repeat();
   final scroll = ScrollController();
   final search = TextEditingController();
   final waitKey = GlobalKey();
@@ -68,10 +66,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         transitionsBuilder: (_, a, _, child) => FadeTransition(
           opacity: CurvedAnimation(parent: a, curve: Curves.easeOut),
           child: ScaleTransition(
-            scale: Tween(
-              begin: 1.06,
-              end: 1.0,
-            ).animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
+            scale: Tween(begin: 1.06, end: 1.0).animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
             child: child,
           ),
         ),
@@ -146,118 +141,157 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
           return Stack(
             children: [
-              Positioned.fill(child: CustomPaint(painter: StarfieldPainter(clock))),
-              // ---------------- feed ----------------
-              Positioned(
-                top: headerH,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: ClipRect(
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: (n) {
-                      if (n is ScrollUpdateNotification && n.depth == 0) {
-                        final m = n.metrics;
-                        final f = m.maxScrollExtent <= 0 ? 0.0 : m.pixels / m.maxScrollExtent;
-                        brain.onScroll(f, true);
-                      }
-                      return false;
-                    },
-                    child: Scrollbar(
-                      controller: scroll,
-                      child: ListView(
-                        controller: scroll,
-                        padding: const EdgeInsets.fromLTRB(14, 4, 14, 40),
-                        children: [
-                          SearchBox(controller: search, onChanged: (v) => setState(() => query = v)),
-                          const SizedBox(height: 12),
-                          if (query.isNotEmpty)
-                            SearchResults(query: query)
-                          else ...[
-                            FireworksCard(
-                              t: clock,
-                              friendName: friendName,
-                              onWatch: () => _push(FireworksShow(brain: brain)),
-                            ),
-                            const SizedBox(height: 12),
-                            RewardCard(brain: brain, onCollect: _collect),
-                            const SizedBox(height: 12),
-                            WeatherCard(brain: brain),
-                            const SizedBox(height: 12),
-                            PhotoBoothCard(onTap: _photo, friendName: friendName),
-                            const SizedBox(height: 12),
-                            PlayCard(
-                              t: clock,
-                              stars: 31,
-                              best: skyBest,
-                              friendName: friendName,
-                              onStarCatch: () => _push(StarCatchGame(brain: brain)),
-                              onSkyLift: () async {
-                                await _push(
-                                  SkyLiftGame(
+              // The page itself: everything here tips back into 3D together
+              // during Lumi's fly-over.
+              Positioned.fill(
+                child: _PageTilt(
+                  brain: brain,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(child: CustomPaint(painter: StarfieldPainter(clock))),
+                      // ---------------- feed ----------------
+                      Positioned(
+                        top: headerH,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: ClipRect(
+                          child: NotificationListener<ScrollNotification>(
+                            onNotification: (n) {
+                              if (n is ScrollUpdateNotification && n.depth == 0) {
+                                final m = n.metrics;
+                                final f = m.maxScrollExtent <= 0 ? 0.0 : m.pixels / m.maxScrollExtent;
+                                brain.onScroll(f, true);
+                              }
+                              return false;
+                            },
+                            child: Scrollbar(
+                              controller: scroll,
+                              child: ListView(
+                                controller: scroll,
+                                padding: const EdgeInsets.fromLTRB(14, 4, 14, 40),
+                                children: [
+                                  _Slab(
                                     brain: brain,
-                                    onBest: (m) {
-                                      if (m > skyBest) skyBest = m;
-                                    },
+                                    radius: 12,
+                                    child: SearchBox(controller: search, onChanged: (v) => setState(() => query = v)),
                                   ),
-                                );
-                              },
+                                  const SizedBox(height: 12),
+                                  if (query.isNotEmpty)
+                                    SearchResults(query: query)
+                                  else ...[
+                                    _Slab(
+                                      brain: brain,
+                                      child: FireworksCard(
+                                        t: clock,
+                                        friendName: friendName,
+                                        onWatch: () => _push(FireworksShow(brain: brain)),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    _Slab(
+                                      brain: brain,
+                                      child: RewardCard(brain: brain, onCollect: _collect),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    _Slab(
+                                      brain: brain,
+                                      child: WeatherCard(brain: brain),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    _Slab(
+                                      brain: brain,
+                                      child: PhotoBoothCard(onTap: _photo, friendName: friendName),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    _Slab(
+                                      brain: brain,
+                                      child: PlayCard(
+                                        t: clock,
+                                        stars: 31,
+                                        best: skyBest,
+                                        friendName: friendName,
+                                        onStarCatch: () => _push(StarCatchGame(brain: brain)),
+                                        onSkyLift: () async {
+                                          await _push(
+                                            SkyLiftGame(
+                                              brain: brain,
+                                              onBest: (m) {
+                                                if (m > skyBest) skyBest = m;
+                                              },
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    _Slab(
+                                      brain: brain,
+                                      child: ParkMapCard(
+                                        friendName: friendName,
+                                        onOpen: () => _push(ParkMapScreen(brain: brain)),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    _Slab(
+                                      brain: brain,
+                                      child: WaitTimesCard(key: waitKey, highlight: highlightRide),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    _Slab(brain: brain, child: const DiningCard()),
+                                  ],
+                                ],
+                              ),
                             ),
-                            const SizedBox(height: 12),
-                            ParkMapCard(
-                              friendName: friendName,
-                              onOpen: () => _push(ParkMapScreen(brain: brain)),
-                            ),
-                            const SizedBox(height: 12),
-                            WaitTimesCard(key: waitKey, highlight: highlightRide),
-                            const SizedBox(height: 12),
-                            const DiningCard(),
-                          ],
-                        ],
+                          ),
+                        ),
                       ),
-                    ),
+                      // ---------------- wardrobe panel ----------------
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 380),
+                        curve: Curves.easeOutCubic,
+                        top: wardrobe ? headerH - 8 : size.height + 20,
+                        left: 0,
+                        right: 0,
+                        height: size.height - headerH + 8,
+                        child: WardrobePanel(brain: brain, onClose: () => setState(() => wardrobe = false)),
+                      ),
+                      // ---------------- header ----------------
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: headerH,
+                        child: IgnorePointer(child: CustomPaint(painter: WeatherPainter(clock, brain.weather))),
+                      ),
+                      Positioned(
+                        top: pad,
+                        left: 0,
+                        right: 0,
+                        height: barH,
+                        child: _TopBar(
+                          brain: brain,
+                          onWardrobe: () => setState(() => wardrobe = !wardrobe),
+                          onSettings: () => _settings(context),
+                        ),
+                      ),
+                      Positioned(
+                        top: pad + barH + stageH,
+                        left: 0,
+                        right: 0,
+                        height: greetH,
+                        child: _Greeting(
+                          brain: brain,
+                          onMic: _mic,
+                          onTrick: brain.trick,
+                          onRoom: () => _push(LumiRoom(brain: brain)),
+                        ),
+                      ),
+                      Positioned.fill(
+                        child: IgnorePointer(child: CustomPaint(painter: _LightPoolPainter(brain))),
+                      ),
+                    ],
                   ),
-                ),
-              ),
-              // ---------------- wardrobe panel ----------------
-              AnimatedPositioned(
-                duration: const Duration(milliseconds: 380),
-                curve: Curves.easeOutCubic,
-                top: wardrobe ? headerH - 8 : size.height + 20,
-                left: 0,
-                right: 0,
-                height: size.height - headerH + 8,
-                child: WardrobePanel(brain: brain, onClose: () => setState(() => wardrobe = false)),
-              ),
-              // ---------------- header ----------------
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: headerH,
-                child: IgnorePointer(child: CustomPaint(painter: WeatherPainter(clock, brain.weather))),
-              ),
-              Positioned(
-                top: pad,
-                left: 0,
-                right: 0,
-                height: barH,
-                child: _TopBar(
-                  brain: brain,
-                  onWardrobe: () => setState(() => wardrobe = !wardrobe),
-                  onSettings: () => _settings(context),
-                ),
-              ),
-              Positioned(
-                top: pad + barH + stageH,
-                left: 0,
-                right: 0,
-                height: greetH,
-                child: _Greeting(
-                  brain: brain,
-                  onMic: _mic,
-                  onTrick: brain.trick,
-                  onRoom: () => _push(LumiRoom(brain: brain)),
                 ),
               ),
               // ---------------- Lumi ----------------
@@ -267,15 +301,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     child: LightLayer(
                       child: SceneView(
                         brain.scene,
-                        camera: brain.space!.camera,
+                        cameraBuilder: (_) => brain.camera,
                         onTick: (_, dt) => brain.tick(dt),
                       ),
                     ),
                   ),
                 ),
-              Positioned.fill(
-                child: IgnorePointer(child: _NotesLayer(brain: brain)),
-              ),
               Positioned.fill(
                 child: IgnorePointer(child: CustomPaint(painter: LumiAuraPainter(brain, front: true))),
               ),
@@ -400,7 +431,11 @@ class _TopBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          Text('Parkday', style: Pd.t(14.5, w: FontWeight.w700)),
+          // Tapping the wordmark sends Lumi on a fly-over of the page.
+          GestureDetector(
+            onTap: brain.flyover,
+            child: Text('Parkday', style: Pd.t(14.5, w: FontWeight.w700)),
+          ),
           const Spacer(),
           dot(Friend.lumi, const [Color(0xFFCDE7FF), Color(0xFF5EA8FF)]),
           dot(Friend.juju, const [Color(0xFFFFC2B0), Color(0xFFFF6F55)]),
@@ -636,75 +671,118 @@ class _RenderLumiHit extends RenderProxyBox {
   }
 }
 
-class _NotesLayer extends StatelessWidget {
-  const _NotesLayer({required this.brain});
+/// Tips the page back by [LumiBrain.pageTilt] with the same perspective as
+/// the overlay scene's camera (eye at the camera distance, centered), so
+/// Lumi and its light stay in register with the tilted widgets.
+class _PageTilt extends StatelessWidget {
+  const _PageTilt({required this.brain, required this.child});
   final LumiBrain brain;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<int>(
       valueListenable: brain.frame,
-      builder: (context, _, _) => Stack(
-        children: [
-          for (final n in brain.notes)
-            Positioned(
-              left: n.pos.dx - 78,
-              top: n.pos.dy - 28,
-              child: Opacity(
-                opacity: n.opacity.clamp(0.0, 1.0),
-                child: Transform(
-                  alignment: Alignment.center,
-                  transform: Matrix4.identity()
-                    ..setEntry(3, 2, 0.0025)
-                    ..rotateY(-n.tiltY)
-                    ..rotateZ(n.turn)
-                    ..scaleByDouble(n.scale, n.scale, 1, 1),
-                  child: _NoteCard(note: n),
-                ),
-              ),
-            ),
-        ],
-      ),
+      child: child,
+      builder: (context, _, child) {
+        return IgnorePointer(
+          ignoring: brain.flying,
+          child: Transform(alignment: Alignment.center, transform: brain.pageMatrix, child: child),
+        );
+      },
     );
   }
 }
 
-class _NoteCard extends StatelessWidget {
-  const _NoteCard({required this.note});
-  final ParkNote note;
+/// While the page is tipped back, lifts a card off it as a thick slab, the
+/// way the original's cards stand up from the page during the fly-over.
+/// The slab's sides are a few stacked copies of its outline, and the card
+/// itself rides on top; flat, it is just the card.
+class _Slab extends StatelessWidget {
+  const _Slab({required this.brain, required this.child, this.radius = 14});
+  final LumiBrain brain;
+  final Widget child;
+  final double radius;
+
+  static const _depth = 16.0, _layers = 5;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 156,
-      padding: const EdgeInsets.fromLTRB(9, 8, 10, 8),
-      decoration: BoxDecoration(
-        color: const Color(0xF0222852),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0x33FFFFFF)),
-        boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 14, offset: Offset(0, 6))],
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Padding(
-            padding: EdgeInsets.only(top: 1),
-            child: Icon(Icons.notifications_rounded, size: 13, color: Pd.gold),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(note.title, style: Pd.t(10.5, w: FontWeight.w700)),
-                const SizedBox(height: 1),
-                Text(note.body, maxLines: 2, style: Pd.t(9, c: Pd.textDim, h: 1.25)),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return ValueListenableBuilder<int>(
+      valueListenable: brain.frame,
+      child: child,
+      builder: (context, _, child) {
+        final k = brain.tiltAmount;
+        final r = BorderRadius.circular(radius);
+        Matrix4 up(double z) => Matrix4.translationValues(0, 0, -z);
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            if (k > 0) ...[
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: r,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.55 * k),
+                        blurRadius: 16,
+                        offset: Offset(0, 8 * k),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              for (var i = 0; i < _layers; i++)
+                Positioned.fill(
+                  child: Transform(
+                    transform: up(_depth * k * i / _layers),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Color.lerp(const Color(0xFF07081A), const Color(0xFF181C3E), i / _layers),
+                        borderRadius: r,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+            Transform(key: const ValueKey('card'), transform: up(_depth * k), child: child),
+          ],
+        );
+      },
     );
   }
+}
+
+/// The pool of light Lumi casts on the cards while it glides over them.
+class _LightPoolPainter extends CustomPainter {
+  _LightPoolPainter(this.brain) : super(repaint: brain.frame);
+  final LumiBrain brain;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final k = brain.poolStrength;
+    if (k <= 0.01) return;
+    final c = brain.poolPos;
+    const r = 150.0;
+    canvas.drawCircle(
+      c,
+      r,
+      Paint()
+        ..blendMode = BlendMode.plus
+        ..shader = RadialGradient(
+          colors: [
+            const Color(0xFF9FD0FF).withValues(alpha: 0.42 * k),
+            const Color(0xFF5E8CFF).withValues(alpha: 0.16 * k),
+            const Color(0x005E8CFF),
+          ],
+          stops: const [0, 0.45, 1],
+        ).createShader(Rect.fromCircle(center: c, radius: r)),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _LightPoolPainter old) => false;
 }
 
 class _FlyingKey extends StatefulWidget {

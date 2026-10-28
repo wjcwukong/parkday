@@ -7,6 +7,7 @@ import 'package:vector_math/vector_math.dart' as vm;
 
 import '../scene/fx.dart';
 import '../scene/lumi_rig.dart';
+import '../scene/note_card.dart';
 import '../scene/space.dart';
 
 enum Weather { clear, rain, snow }
@@ -22,11 +23,9 @@ class ParkNote {
 
   // Animation state, owned by the brain.
   double age = 0;
-  Offset pos = Offset.zero;
-  double scale = 1;
-  double turn = 0; // rotation in radians
-  double tiltY = 0; // perspective swing
-  double opacity = 0;
+  Offset pos = Offset.zero; // where the card shows on screen
+  NoteCard? card;
+  bool _loading = false;
   bool eaten = false;
   bool done = false;
 }
@@ -93,6 +92,7 @@ class LumiBrain extends ChangeNotifier {
   double _dizzyT = 0, _eatT = 0, _trickT = 0, _surpriseT = 0, _emoteT = 0;
   double _cheerT = 0;
   double _starryT = 0;
+  double _holdT = 0;
   Face _emote = Face.wink;
   double _noteTimer = 4;
   double _scrollIdle = 99, _scrollActive = 0;
@@ -105,6 +105,74 @@ class LumiBrain extends ChangeNotifier {
   int _lastPetMs = 0;
   double _roughness = 0;
   int _noteCursor = 0;
+
+  // ---------------- page fly-over ----------------
+  /// How far the page is tipped back into 3D, in radians (top away). The
+  /// home page applies the same tilt to its widgets with a perspective
+  /// matching [camera], so the UI and the scene stay in register.
+  double pageTilt = 0;
+
+  /// The page's turn about its vertical axis, and how far it is lifted up
+  /// the screen and pulled towards the viewer (logical pixels) while
+  /// tilted. Fitted to the original's frames: about 37 degrees, with the
+  /// page brought up and in so the header stays near the top.
+  double pageYaw = 0, pageLift = 0, pagePush = 0;
+  double _flyT = -1;
+  double _hover = 0; // Lumi's height off the page, in world units (-Z)
+  bool get flying => _flyT >= 0;
+
+  /// How far into the fly-over tilt the page is, 0 (flat) to 1.
+  double get tiltAmount => (pageTilt / _tiltMax).clamp(0, 1);
+
+  /// Where Lumi's light lands on the page and how bright it is.
+  Offset poolPos = Offset.zero;
+  double poolStrength = 0;
+  static const _flyLen = 9.0, _tiltMax = 0.64;
+
+  /// Tips the page back and lets Lumi glide down over the feed, lighting
+  /// up the cards it passes, then sets everything back.
+  void flyover() {
+    if (flying || asleep || away || space == null) return;
+    _flyT = 0;
+    _setStatus('Lumi is exploring the page', 999);
+    notifyListeners();
+  }
+
+  /// The tilt, turn and lift as a transform of the page's widgets about
+  /// their center, with the scene camera's perspective, for a `Transform`
+  /// widget.
+  Matrix4 get pageMatrix {
+    final sp = space;
+    if (pageTilt == 0 || sp == null) return Matrix4.identity();
+    return Matrix4.identity()
+      ..setEntry(3, 2, 1 / (sp.distance * sp.ppu))
+      ..translateByDouble(0, -pageLift, -pagePush, 1)
+      ..rotateY(pageYaw)
+      ..rotateX(-pageTilt);
+  }
+
+  /// The overlay camera. Tipping the page is the same as swinging the
+  /// camera the other way around it, so the scene stays in register with
+  /// [pageMatrix]. (World y is up where the widgets' y is down, which
+  /// flips the sign of the tilt and the lift.)
+  Camera get camera {
+    final sp = space!;
+    if (pageTilt == 0) return sp.camera;
+    final page =
+        vm.Matrix4.translationValues(0, pageLift / sp.ppu, -pagePush / sp.ppu) *
+        vm.Matrix4.rotationY(pageYaw) *
+        vm.Matrix4.rotationX(pageTilt);
+    final inv = vm.Matrix4.inverted(page);
+    final dist = sp.distance;
+    return PerspectiveCamera(
+      fovRadiansY: sp.fov,
+      position: inv.transform3(vm.Vector3(0, 0, -dist)),
+      target: inv.transform3(vm.Vector3.zero()),
+      up: inv.rotated3(vm.Vector3(0, 1, 0)),
+      fovNear: 0.5,
+      fovFar: dist + 60,
+    );
+  }
 
   Offset get lumiPos => _pos;
   double get lumiScale => _scale;
@@ -130,11 +198,7 @@ class LumiBrain extends ChangeNotifier {
     fx = HomeFx(scene);
     final r = await LumiRig.create();
     scene.add(r.root);
-    final s = Sparks(
-      22,
-      size: 0.022,
-      area: vm.Aabb3.minMax(vm.Vector3(-2.2, 0.6, -0.6), vm.Vector3(2.2, 4.2, 2.5)),
-    );
+    final s = Sparks(22, size: 0.022, area: vm.Aabb3.minMax(vm.Vector3(-2.2, 0.6, -0.6), vm.Vector3(2.2, 4.2, 2.5)));
     scene.add(s.node);
     sparks = s;
     rig = r;
@@ -296,6 +360,18 @@ class LumiBrain extends ChangeNotifier {
     fx?.shockwave(_world(_pos, -0.7), style.rim * 0.6 + style.tint * 0.4);
   }
 
+  /// A Catmull-Rom spline through [pts] at [u] in 0..1.
+  static Offset _catmull(List<Offset> pts, double u) {
+    final n = pts.length - 1;
+    final x = (u * n).clamp(0.0, n - 1e-6);
+    final i = x.floor();
+    final t = x - i;
+    Offset p(int k) => pts[k.clamp(0, n)];
+    final p0 = p(i - 1), p1 = p(i), p2 = p(i + 1), p3 = p(i + 2);
+    final t2 = t * t, t3 = t2 * t;
+    return (p1 * 2 + (p2 - p0) * t + (p0 * 2 - p1 * 5 + p2 * 4 - p3) * t2 + (p1 * 3 - p0 - p2 * 3 + p3) * t3) * 0.5;
+  }
+
   /// Lumi's spot in the overlay scene, nudged towards the camera by [z].
   vm.Vector3 _world(Offset p, [double z = 0]) => space?.toWorld(p, z) ?? vm.Vector3.zero();
 
@@ -441,6 +517,9 @@ class LumiBrain extends ChangeNotifier {
     final s = space;
     if (s == null) return;
     note.pos = Offset(s.size.width + 120, _pos.dy - 10);
+    note.age = 0;
+    note.eaten = false;
+    note.done = false;
     notes.add(note);
   }
 
@@ -459,13 +538,7 @@ class LumiBrain extends ChangeNotifier {
       'A Lagoon Key is hiding nearby',
       Icons.notifications_rounded,
     ),
-    ParkNote(
-      'Show',
-      'Showtime',
-      'Fireworks over the lagoon in 20 min',
-      'Fireworks in 20 minutes',
-      Icons.auto_awesome,
-    ),
+    ParkNote('Show', 'Showtime', 'Fireworks over the lagoon in 20 min', 'Fireworks in 20 minutes', Icons.auto_awesome),
     ParkNote(
       'Ride',
       'Ride alert',
@@ -514,6 +587,7 @@ class LumiBrain extends ChangeNotifier {
     _emoteT -= dt;
     _cheerT -= dt;
     _starryT -= dt;
+    _holdT -= dt;
     _scrollIdle += dt;
 
     _petIdle += dt;
@@ -560,7 +634,7 @@ class LumiBrain extends ChangeNotifier {
     }
 
     // notifications
-    if (notificationsOn && !away) {
+    if (notificationsOn && !away && !flying) {
       _noteTimer -= dt;
       if (_noteTimer <= 0 && notes.isEmpty) {
         pushNote();
@@ -575,6 +649,44 @@ class LumiBrain extends ChangeNotifier {
       final sr = scrollRect;
       target = Offset(s.size.width - 16, sr.top + 26 + _scrollFrac * math.max(0, sr.height - 70));
       _scaleTarget = 0.3;
+    }
+    if (flying) {
+      _flyT += dt;
+      final f = _flyT;
+      final tin = Curves.easeInOutCubic.transform((f / 1.5).clamp(0, 1));
+      final tout = Curves.easeInOutCubic.transform(((f - (_flyLen - 1.5)) / 1.5).clamp(0, 1));
+      final k = tin - tout;
+      pageTilt = _tiltMax * k;
+      pageLift = 60 * k;
+      pagePush = 100 * k;
+      // The page turns a little towards wherever Lumi is.
+      final yawTo = -0.2 * ((_pos.dx - s.size.width / 2) / (s.size.width / 2)) * k;
+      pageYaw += (yawTo - pageYaw) * (1 - math.exp(-dt * 2));
+      _scaleTarget = 1 - 0.4 * k;
+      // A loop down over the feed and back up to the header.
+      final w = s.size.width, top = scrollRect.top;
+      final path = [
+        home,
+        Offset(w * 0.42, top + 20),
+        Offset(w * 0.72, top + 150),
+        Offset(w * 0.34, top + 290),
+        Offset(w * 0.6, top + 90),
+        home,
+      ];
+      final u = Curves.easeInOutSine.transform(((f - 0.9) / (_flyLen - 2.4)).clamp(0, 1));
+      target = _catmull(path, u);
+      final lift = math.sin(math.pi * u);
+      _hover += (-1.15 * lift - _hover) * (1 - math.exp(-dt * 4));
+      poolPos = _pos;
+      poolStrength = (lift * 1.6).clamp(0, 1) * (tin - tout);
+      if (f >= _flyLen) {
+        _flyT = -1;
+        pageTilt = pageYaw = pageLift = pagePush = 0;
+        _hover = 0;
+        poolStrength = 0;
+        _setStatus('That was fun!', 2.5);
+        notifyListeners();
+      }
     }
     if (away) {
       _awayT += dt;
@@ -646,6 +758,15 @@ class LumiBrain extends ChangeNotifier {
       hands = 1;
     }
     if (_cheerT > 0) hands = 1;
+    if (_holdT > 0) {
+      hands = math.max(hands, 0.55);
+      gaze = vm.Vector2(gaze.x * 0.3, 0.8);
+    }
+    if (flying && _hover < -0.3) {
+      face = Face.happy;
+      hands = 0.7;
+      gaze = vm.Vector2(0, 0.6);
+    }
     if (_starryT > 0) face = Face.starry;
     if (_eatT > 0) {
       face = Face.munch;
@@ -681,7 +802,7 @@ class LumiBrain extends ChangeNotifier {
     r.update(dt);
 
     // place in 3D
-    r.root.position = s.toWorld(_pos - Offset(0, 0));
+    r.root.position = s.toWorld(_pos) + vm.Vector3(0, 0, _hover);
     r.root.scale = vm.Vector3.all(_scale.clamp(0.001, 2));
 
     sparks?.node.visible = ambientSparks;
@@ -708,43 +829,92 @@ class LumiBrain extends ChangeNotifier {
     frame.value++;
   }
 
+  /// Flies a note in from the right, lets Lumi catch it in its hands, tip
+  /// it over and swallow it; the card ends up inside the glass head, where
+  /// it shrinks away.
   void _tickNote(ParkNote n, double dt) {
-    n.age += dt;
     final s = space!;
-    final rest = Offset(math.min(s.size.width - 92, _pos.dx + headRadiusPx + 72), _pos.dy - 6);
-    final mouth = _pos + Offset(0, headRadiusPx * 0.3);
-    const arrive = 0.7, hold = 1.7, gulp = 0.55;
-    if (asleep || away) {
-      // nobody to eat it: drift past and fade
-      n.pos = Offset.lerp(n.pos, Offset(rest.dx, rest.dy - 40), 1 - math.exp(-dt * 3))!;
-      n.opacity = (n.age < 3 ? 1.0 : (1 - (n.age - 3))).clamp(0, 1);
-      n.tiltY = 0.25;
-      if (n.age > 4) n.done = true;
+    final card = n.card;
+    if (card == null) {
+      if (!n._loading) {
+        n._loading = true;
+        NoteCard.create(n.title, n.body, n.icon).then(
+          (c) {
+            n.card = c;
+            scene.add(c.node);
+          },
+          onError: (Object _) {
+            n.done = true;
+          },
+        );
+      }
       return;
     }
-    if (n.age < arrive) {
-      final t = Curves.easeOutBack.transform(n.age / arrive);
-      n.pos = Offset.lerp(Offset(s.size.width + 140, rest.dy), rest, t)!;
-      n.opacity = (n.age / 0.25).clamp(0, 1);
-      n.tiltY = (1 - t) * 0.9;
-      n.turn = 0;
-      if (n.age + dt >= arrive * 0.5 && n.age < arrive * 0.5) _surpriseT = 0.6;
-    } else if (n.age < arrive + hold) {
-      n.pos = rest + Offset(0, math.sin(n.age * 3) * 2);
-      n.tiltY = 0.12;
-      n.opacity = 1;
-    } else if (n.age < arrive + hold + gulp) {
+    n.age += dt;
+    final hr = headRadiusPx;
+    const arrive = 0.7, hold = 1.4, tip = 0.8, gulp = 0.5, digest = 0.6;
+
+    // Poses: screen position, depth (negative is towards the camera),
+    // yaw, pitch, roll, scale.
+    final restX = math.min(_pos.dx + hr + 72, s.size.width - NoteCard.size.width * _scale * 0.45);
+    final rest = (Offset(restX, _pos.dy - 8), -0.2, 0.45, 0.0, 0.0, 1.0);
+    final held = (_pos + Offset(0, hr * 1.12), -0.8, 0.12, 0.55, 0.12, 0.86);
+    // Tipped up on Lumi's left, one corner at the mouth, like the video.
+    final tipped = (_pos + Offset(-hr * 0.85, hr * 0.8), -0.7, -0.15, 0.35, 0.95, 0.78);
+    final mouth = (_pos + Offset(-hr * 0.5, hr * 0.5), -0.5, -0.1, 0.45, 1.0, 0.62);
+    final inside = (_pos + Offset(-hr * 0.05, -hr * 0.05), 0.05, 0.0, 0.6, 1.25, 0.32);
+    final enter = (Offset(s.size.width + 160, _pos.dy - 30), -0.2, 1.3, 0.0, 0.25, 1.0);
+    final drift = (Offset(rest.$1.dx + 30, rest.$1.dy - 50), -0.2, 0.7, 0.0, 0.1, 1.0);
+
+    (Offset, double, double, double, double, double) lerp(
+      (Offset, double, double, double, double, double) a,
+      (Offset, double, double, double, double, double) b,
+      double t,
+    ) {
+      double l(double x, double y) => x + (y - x) * t;
+      return (Offset.lerp(a.$1, b.$1, t)!, l(a.$2, b.$2), l(a.$3, b.$3), l(a.$4, b.$4), l(a.$5, b.$5), l(a.$6, b.$6));
+    }
+
+    var pose = rest;
+    var opacity = 1.0;
+    final g = n.age;
+    if (asleep || away) {
+      // Nobody to eat it: it drifts past and fades.
+      pose = lerp(rest, drift, (g / 4).clamp(0, 1));
+      opacity = (g < 3 ? 1.0 : 4 - g).clamp(0, 1);
+      if (g > 4) n.done = true;
+    } else if (g < arrive) {
+      pose = lerp(enter, rest, Curves.easeOutBack.transform(g / arrive));
+      opacity = (g / 0.2).clamp(0, 1);
+      if (g + dt >= arrive * 0.5 && g < arrive * 0.5) _surpriseT = 0.6;
+    } else if (g < arrive + hold) {
+      // Catch it, then hold it up in front of the body.
+      final t = Curves.easeInOutCubic.transform(((g - arrive) / 0.5).clamp(0, 1));
+      pose = lerp(rest, held, t);
+      final bob = math.sin(g * 3) * 3;
+      pose = (pose.$1 + Offset(0, bob), pose.$2, pose.$3, pose.$4 + math.sin(g * 2.3) * 0.05, pose.$5, pose.$6);
+      _holdT = 0.3;
+    } else if (g < arrive + hold + tip) {
+      // Tip it up to the mouth and nibble the corner in.
+      final t = (g - arrive - hold) / tip;
+      pose = t < 0.6
+          ? lerp(held, tipped, Curves.easeInOutCubic.transform(t / 0.6))
+          : lerp(tipped, mouth, Curves.easeInOut.transform((t - 0.6) / 0.4));
+      _holdT = 0.3;
+      if (t > 0.6) _eatT = 1.3;
+    } else if (g < arrive + hold + tip + gulp) {
       if (!n.eaten) {
         n.eaten = true;
         _cheerT = 0.4;
       }
-      final t = Curves.easeInCubic.transform((n.age - arrive - hold) / gulp);
-      n.pos = Offset.lerp(rest, mouth, t)!;
-      n.scale = 1 - t * 0.95;
-      n.turn = -t * 1.1;
-      n.tiltY = 0.12 + t * 0.6;
-      n.opacity = 1 - t * 0.6;
-      if (t > 0.6) _eatT = 1.3;
+      final t = (g - arrive - hold - tip) / gulp;
+      pose = lerp(mouth, inside, Curves.easeInCubic.transform(t));
+      _eatT = 1.3;
+    } else if (g < arrive + hold + tip + gulp + digest) {
+      // Inside the head: it tumbles and dissolves.
+      final t = (g - arrive - hold - tip - gulp) / digest;
+      pose = (inside.$1, inside.$2, inside.$3 + t * 1.4, inside.$4, inside.$5 + t * 0.8, inside.$6 * (1 - t));
+      opacity = 1 - t * t;
     } else {
       n.done = true;
       _eatT = 1.3;
@@ -752,8 +922,20 @@ class LumiBrain extends ChangeNotifier {
       Future.delayed(const Duration(milliseconds: 160), () => rig?.squashY = 0.92);
       Future.delayed(const Duration(milliseconds: 320), () => rig?.squashY = 1.0);
       _setStatus(n.after, 4);
-      fx?.puff(_world(mouth), vm.Vector3(1.0, 0.6, 0.25));
+      fx?.puff(_world(_pos + Offset(-hr * 0.2, hr * 0.3), -0.5), vm.Vector3(1.0, 0.6, 0.25));
     }
+
+    final (at, depth, yaw, pitch, roll, size) = pose;
+    n.pos = at;
+    card.node
+      ..position = _world(at, depth) + vm.Vector3(0, 0, _hover)
+      ..rotation =
+          vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), yaw) *
+          vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), -pitch) *
+          vm.Quaternion.axisAngle(vm.Vector3(0, 0, 1), roll)
+      ..scale = vm.Vector3.all(math.max(0.001, size * _scale));
+    card.opacity = opacity;
+    if (n.done) card.node.detach();
   }
 
   @override

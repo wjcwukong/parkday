@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_scene/scene.dart';
@@ -67,4 +68,20 @@ class Projector {
     if (cw <= 0.01) return 0;
     return size.height / (2 * math.tan(fovY / 2) * cw);
   }
+}
+
+/// A [w] x [h] card for a texture (v = 0 at the top) that reads the right
+/// way round from the -Z side, which is the side a camera looking down +Z
+/// sees. Translucent materials are always back-face culled, so turn the
+/// card's +Z away from the viewer.
+MeshGeometry cardQuad(double w, double h) {
+  final hw = w / 2, hh = h / 2;
+  return MeshGeometry.fromArrays(
+    positions: Float32List.fromList([hw, -hh, 0, -hw, -hh, 0, -hw, hh, 0, hw, hh, 0]),
+    normals: Float32List.fromList([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+    texCoords: Float32List.fromList([1, 1, 0, 1, 0, 0, 1, 0]),
+    indices: [0, 1, 3, 3, 1, 2],
+    // A flat quad's scanned bounds have no depth, which culling drops.
+    bounds: vm.Aabb3.minMax(vm.Vector3(-hw, -hh, -0.05), vm.Vector3(hw, hh, 0.05)),
+  );
 }

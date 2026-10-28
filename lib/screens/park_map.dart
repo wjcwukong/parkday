@@ -82,6 +82,11 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
 
   // animated rides
   final spinners = <(Node, double)>[];
+
+  // Wait-time tags: live widgets on 3D cards above each ride.
+  final tags = <(Ride, Node)>[];
+  final selected = ValueNotifier<Ride?>(null);
+  static const _tagSize = Size(120, 50), _tagHeight = 0.74;
   Node? dropRing;
 
   // Lumi hopping
@@ -234,6 +239,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
     }
 
     _buildRides();
+    _buildTags();
 
     final r = await widget.brain.makeRig();
     r.showUmbrella = false;
@@ -428,9 +434,74 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
     }
   }
 
+  /// One card per ride, hosting the real tag widget through Flutter Scene's
+  /// `WidgetComponent`: it sits in the map in perspective, shrinks with
+  /// distance and hides behind the Moon Drop tower like any other object.
+  void _buildTags() {
+    for (final ride in rides) {
+      final h = ride.name == 'Moon Drop' ? 3.1 : 1.9;
+      final node = Node(name: 'tag ${ride.name}')..position = vm.Vector3(ride.x, h + _tagHeight / 2, ride.z);
+      node.addComponent(
+        WidgetComponent(
+          size: _tagSize,
+          pixelRatio: 3,
+          worldHeight: _tagHeight,
+          geometry: cardQuad(_tagHeight * _tagSize.width / _tagSize.height, _tagHeight),
+          // Taps are hit-tested against the cards by the map itself, so a
+          // drag that starts on a tag still pans the map.
+          input: WidgetInput.manual,
+          update: const WidgetUpdatePolicy.interval(Duration(milliseconds: 200)),
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: ValueListenableBuilder(
+              valueListenable: selected,
+              builder: (_, sel, _) => _RideTag(ride: ride, onGo: () {}, selected: sel == ride),
+            ),
+          ),
+        ),
+      );
+      scene.add(node);
+      tags.add((ride, node));
+    }
+  }
+
+  /// Turns the cards to face the camera, tipped back a little less than
+  /// the view so they read as cards standing in the park.
+  void _faceTags() {
+    final q =
+        vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), -azimuth) *
+        vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), elevation * 0.8);
+    for (final (_, n) in tags) {
+      n.rotation = q;
+    }
+  }
+
+  /// The ride whose card is under [p], nearest first.
+  Ride? _tagAt(Offset p) {
+    final proj = Projector(camera, size);
+    Ride? best;
+    var bestDepth = double.infinity;
+    for (final (ride, n) in tags) {
+      final c = n.position;
+      final center = proj(c.x, c.y, c.z);
+      final top = proj(c.x, c.y + _tagHeight / 2, c.z);
+      if (center == null || top == null) continue;
+      final hh = (center - top).distance;
+      final hw = hh * _tagSize.width / _tagSize.height;
+      if ((p.dx - center.dx).abs() > hw || (p.dy - center.dy).abs() > hh) continue;
+      final depth = (camera.position - c).length;
+      if (depth < bestDepth) {
+        bestDepth = depth;
+        best = ride;
+      }
+    }
+    return best;
+  }
+
   void _go(Ride ride) {
     final r = rig;
     if (r == null) return;
+    selected.value = ride;
     setState(() {
       lumiFrom = _lumiGround();
       lumiTo = vm.Vector3(ride.x, 0, ride.z) + vm.Vector3(math.sin(azimuth), 0, -math.cos(azimuth)) * 1.2;
@@ -449,6 +520,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
   void _tick(double dt) {
     t += dt;
     camera = _cam();
+    _faceTags();
     for (final (n, speed) in spinners) {
       n.rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), t * speed);
     }
@@ -491,6 +563,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
   @override
   void dispose() {
     frame.dispose();
+    selected.dispose();
     super.dispose();
   }
 
@@ -524,6 +597,10 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
               if (rig != null)
                 Positioned.fill(
                   child: GestureDetector(
+                    onTapUp: (d) {
+                      final ride = _tagAt(d.localPosition);
+                      if (ride != null) _go(ride);
+                    },
                     onScaleStart: (d) {
                       _scaleStart = distance;
                       _rotStart = azimuth;
@@ -547,37 +624,6 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
                 )
               else
                 const Center(child: CircularProgressIndicator(color: Colors.white)),
-              // floating wait-time tags
-              if (rig != null)
-                ValueListenableBuilder(
-                  valueListenable: frame,
-                  builder: (_, _, _) {
-                    final proj = Projector(camera, size);
-                    final tags = <(double, Widget)>[];
-                    for (final ride in rides) {
-                      final h = ride.name == 'Moon Drop' ? 3.1 : 1.9;
-                      final p = proj(ride.x, h, ride.z);
-                      if (p == null ||
-                          p.dx < -80 ||
-                          p.dx > size.width + 80 ||
-                          p.dy < 40 ||
-                          p.dy > size.height - 90) {
-                        continue;
-                      }
-                      final depth = (camera.position - vm.Vector3(ride.x, h, ride.z)).length;
-                      tags.add((
-                        depth,
-                        Positioned(
-                          left: p.dx - 58,
-                          top: p.dy - 44,
-                          child: _RideTag(ride: ride, onGo: () => _go(ride), selected: heading == ride),
-                        ),
-                      ));
-                    }
-                    tags.sort((a, b) => b.$1.compareTo(a.$1));
-                    return Stack(children: [for (final t in tags) t.$2]);
-                  },
-                ),
               Positioned(
                 top: pad.top + 4,
                 left: 4,
@@ -685,7 +731,6 @@ class _RideTag extends StatelessWidget {
           color: const Color(0xF01A1F45),
           borderRadius: BorderRadius.circular(9),
           border: Border.all(color: selected ? const Color(0xFF8FD3FF) : const Color(0x22FFFFFF)),
-          boxShadow: const [BoxShadow(color: Color(0x55000000), blurRadius: 8, offset: Offset(0, 3))],
         ),
         child: Row(
           children: [
