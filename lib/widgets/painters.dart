@@ -43,8 +43,8 @@ class StarfieldPainter extends CustomPainter {
   bool shouldRepaint(covariant StarfieldPainter old) => false;
 }
 
-/// Soft light that the glass spirit throws on its surroundings, plus 2D
-/// sparkles (bursts, hearts, Zzz) that float around it.
+/// The 2D hearts and Zzz that float around Lumi (its sparkle bursts are 3D,
+/// see `HomeFx`).
 class LumiAuraPainter extends CustomPainter {
   LumiAuraPainter(this.brain, {this.front = false}) : super(repaint: brain.frame);
   final LumiBrain brain;
@@ -55,33 +55,10 @@ class LumiAuraPainter extends CustomPainter {
     final rig = brain.rig;
     final space = brain.space;
     if (rig == null || space == null) return;
-    // The glow around Lumi comes from the scene's bloom now; only the
-    // front particles are painted here.
     if (front) _particles(canvas);
   }
 
   void _particles(Canvas canvas) {
-    for (final b in brain.bursts) {
-      final t = (b.age / 1.2).clamp(0.0, 1.0);
-      final ease = Curves.easeOutCubic.transform(t);
-      for (var ring = 0; ring < b.rings; ring++) {
-        final rad = (60 + ring * 34) * ease + 20;
-        for (var i = 0; i < b.count; i++) {
-          final a = i / b.count * math.pi * 2 + ring * 0.3;
-          final p = b.center + Offset(math.cos(a), math.sin(a)) * rad;
-          final sz = (1 - t) * (2.6 - ring * 0.6);
-          if (sz <= 0) continue;
-          canvas.drawCircle(
-            p,
-            sz * 2.4,
-            Paint()
-              ..color = b.color.withValues(alpha: 0.25 * (1 - t))
-              ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
-          );
-          canvas.drawCircle(p, sz, Paint()..color = b.color.withValues(alpha: 1 - t));
-        }
-      }
-    }
     for (final (o, age) in brain.heartList) {
       final t = age / 1.4;
       final p = o + Offset(math.sin(age * 5) * 6, -age * 50);

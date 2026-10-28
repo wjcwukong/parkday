@@ -5,8 +5,8 @@ import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
 import '../lumi/lumi_brain.dart';
+import '../scene/fx.dart';
 import '../scene/lumi_rig.dart';
-import '../scene/space.dart';
 import '../theme.dart';
 
 const _showLength = 60.0;
@@ -21,10 +21,12 @@ class _Chapter {
 
 const _chapters = [
   _Chapter('first break', 0, [0.2, 1.9, -5.5], [0.0, 12.0, 60.0]),
-  _Chapter('close-up', 12, [1.3, 1.9, -2.6], [0.0, 3.4, 10.0]),
+  // Close shots turn around and look back at Lumi's face, with the pier
+  // and its lanterns behind it.
+  _Chapter('close-up', 12, [0.5, 2.05, 5.0], [0.35, 1.35, 1.6]),
   _Chapter('build', 22, [-0.6, 3.2, -9.0], [0.0, 12.0, 60.0]),
   _Chapter('finale', 38, [-2.4, 4.6, -11.0], [0.0, 15.0, 70.0]),
-  _Chapter('afterglow', 52, [0.0, 2.4, -3.6], [0.0, 6.0, 40.0]),
+  _Chapter('afterglow', 52, [-1.5, 2.5, 4.6], [0.35, 2.1, 1.6]),
 ];
 
 enum _Kind { peony, ring, willow, palm, glitter }
@@ -44,13 +46,86 @@ class _Shell {
   double get life => kind == _Kind.willow ? 4.6 : (kind == _Kind.glitter ? 3.2 : 2.6);
   late final List<vm.Vector3> dirs = _dirs();
 
+  static vm.Vector3 _light(Color c, double gain) {
+    double lin(double v) => math.pow(v, 2.2).toDouble() * gain;
+    return vm.Vector3(lin(c.r), lin(c.g), lin(c.b));
+  }
+
+  /// Adds this shell to the show mesh: the rising comet, the burst flash,
+  /// the stars with their trails, and the smoke they leave behind. Mirrors
+  /// the motion the old painter computed, now evaluated in `sparks.fmat`.
+  void emit(SparkBuilder b) {
+    final rnd = math.Random(seed * 31 + 7);
+    final at = vm.Vector3(x, height, z);
+    final willow = kind == _Kind.willow;
+    final palm = kind == _Kind.palm;
+    const g = -5.5;
+
+    // Comet: drag k, reaching the burst height after `rise` seconds.
+    const k = 0.8;
+    final climb = (height - 0.5 * g * rise * rise) * k / (1 - math.exp(-k * rise));
+    b.add(
+      origin: vm.Vector3(x, 0, z),
+      velocity: vm.Vector3(0, climb, 0),
+      start: launch,
+      life: rise,
+      color: vm.Vector3(1.6, 1.1, 0.6),
+      size: 0.1,
+      drag: k,
+      gravity: g,
+      trail: 0.35,
+      kind: SparkKind.comet,
+    );
+
+    b.add(
+      origin: at,
+      start: burst,
+      life: 0.7,
+      color: _light(colors.first, 1.4),
+      size: 9 * scale,
+      kind: SparkKind.flash,
+    );
+
+    final speed = (willow ? 17.0 : (palm ? 20.0 : 23.0)) * scale;
+    for (var i = 0; i < dirs.length; i++) {
+      final c = _light(colors[i % colors.length], willow ? 3.0 : 4.5);
+      b.add(
+        origin: at,
+        velocity: dirs[i] * speed,
+        start: burst,
+        life: life * (0.85 + rnd.nextDouble() * 0.15),
+        color: c,
+        size: palm ? 0.34 : (willow ? 0.18 : 0.24),
+        drag: willow ? 1.6 : 1.15,
+        gravity: willow ? g * 1.4 : g,
+        trail: palm ? 0.5 : (willow ? 0.7 : 0.2),
+        kind: kind == _Kind.glitter || (willow && i.isEven) ? SparkKind.glitter : SparkKind.spark,
+      );
+    }
+
+    // Smoke the burst leaves hanging, lit in its colors.
+    for (var i = 0; i < 6; i++) {
+      final off = vm.Vector3(rnd.nextDouble() - 0.5, rnd.nextDouble() - 0.6, rnd.nextDouble() - 0.5) * 14 * scale;
+      b.add(
+        origin: at + off,
+        velocity: vm.Vector3(0.9 + rnd.nextDouble() * 0.6, -0.2, 0),
+        start: burst + 0.15,
+        life: 9 + rnd.nextDouble() * 4,
+        color: _light(colors.first, 0.05),
+        size: (9 + rnd.nextDouble() * 6) * scale,
+        kind: SparkKind.smoke,
+      );
+    }
+  }
+
   List<vm.Vector3> _dirs() {
     final rnd = math.Random(seed);
     final out = <vm.Vector3>[];
     switch (kind) {
       case _Kind.ring:
         final tilt = rnd.nextDouble() * 0.9 - 0.45;
-        final yaw = rnd.nextDouble() * math.pi;
+        // Keep rings turned mostly towards the audience.
+        final yaw = (rnd.nextDouble() - 0.5) * 1.2;
         for (var i = 0; i < 64; i++) {
           final a = i / 64 * math.pi * 2;
           var v = vm.Vector3(math.cos(a), math.sin(a), 0);
@@ -63,7 +138,7 @@ class _Shell {
           out.add(vm.Vector3(math.cos(a) * 0.8, 0.55, math.sin(a) * 0.8).normalized());
         }
       default:
-        final n = kind == _Kind.willow ? 70 : 96;
+        final n = kind == _Kind.willow ? 90 : 140;
         for (var i = 0; i < n; i++) {
           // Fibonacci sphere, jittered.
           final y = 1 - (i + 0.5) / n * 2;
@@ -149,7 +224,11 @@ class _FireworksShowState extends State<FireworksShow> {
   PerspectiveCamera camera = PerspectiveCamera(fovRadiansY: 50 * vm.degrees2Radians);
   Size size = Size.zero;
   double flash = 0;
-  Offset? lastBurstScreen;
+  double _clock = 0;
+  PreprocessedMaterial? lagoon;
+  PreprocessedMaterial? sparks;
+
+  static const _waterY = -0.35;
 
   @override
   void initState() {
@@ -159,41 +238,93 @@ class _FireworksShowState extends State<FireworksShow> {
 
   Future<void> _build() async {
     await Scene.initializeStaticResources();
-    scene.toneMapping = ToneMappingMode.linear;
+    // A night look: a gradient sky with a moon, purple haze that swallows
+    // the far shore, and bloom so every spark and lantern glows.
+    scene.environmentSettings = EnvironmentSettings(
+      skybox: Skybox(
+        GradientSkySource(
+          zenithColor: vm.Vector3(0.03, 0.014, 0.11),
+          horizonColor: vm.Vector3(0.2, 0.08, 0.34),
+          groundColor: vm.Vector3(0.02, 0.01, 0.05),
+          // The moon is a glow in the spark mesh; the sky's own sun disk
+          // and its wide halo are switched off.
+          sunDirection: _moonDir,
+          sunColor: vm.Vector3.zero(),
+        ),
+      ),
+      toneMapping: ToneMappingMode.pbrNeutral,
+      exposure: 1.0,
+      bloomEnabled: true,
+      bloomThreshold: 0.9,
+      bloomIntensity: 0.35,
+      bloomScatter: 0.65,
+      fogEnabled: true,
+      fogMode: FogMode.exponential,
+      fogColor: vm.Vector3(0.075, 0.032, 0.15),
+      fogDensity: 0.006,
+      fogMaxOpacity: 0.85,
+      vignetteEnabled: true,
+      vignetteIntensity: 0.4,
+    );
+    scene.depthOfField
+      ..fStop = 1.2
+      ..blurScale = 2.0
+      ..quality = DepthOfFieldQuality.medium;
     final r = await widget.brain.makeRig();
     r.root.position = vm.Vector3(0.35, 1.45, 1.6);
+    r.root.rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), math.pi);
     r.root.scale = vm.Vector3.all(0.82);
     r.showUmbrella = false;
     scene.add(r.root);
-    _buildWorld();
+    await _buildWorld();
     if (mounted) setState(() => rig = r);
   }
 
-  void _buildWorld() {
-    // Water: a dark, slightly see-through plane, so the painted reflections
-    // behind the scene show through it.
-    final water = Node(
-      mesh: Mesh(
-        PlaneGeometry(width: 600, depth: 600),
-        unlit(0.006, 0.006, 0.03, 0.72)..alphaMode = AlphaMode.blend,
-      ),
-    );
-    water.position = vm.Vector3(0, -0.35, 150);
+  static final _moonDir = vm.Vector3(-0.05, 0.36, 0.93).normalized();
+
+  Future<void> _buildWorld() async {
+    // Water: a mirror of the whole scene, rippled in its material.
+    lagoon = await loadFmatMaterial('assets/materials/lagoon.fmat');
+    final water = Node(mesh: Mesh(PlaneGeometry(width: 600, depth: 600), lagoon!))
+      ..addComponent(PlanarReflectorComponent(resolutionScale: 0.5));
+    water.position = vm.Vector3(0, _waterY, 150);
     scene.add(water);
+
+    // The whole show is one mesh of sparks moved on the GPU by `time`.
+    sparks = await loadFmatMaterial('assets/materials/sparks.fmat');
+    final b = SparkBuilder();
+    for (final s in shells) {
+      s.emit(b);
+    }
+    _stars(b);
+    scene.add(
+      Node(name: 'show', mesh: b.build(sparks!, vm.Aabb3.minMax(vm.Vector3.all(-700), vm.Vector3.all(700)))),
+    );
 
     // The pier, its posts and lantern bulbs.
     final wood = unlit(0.05, 0.03, 0.035);
     final plank = unlit(0.07, 0.045, 0.05);
-    final deck = Node(mesh: Mesh(CuboidGeometry(vm.Vector3(2.6, 0.12, 36)), plank));
-    deck.position = vm.Vector3(0, 0.0, 14);
+    // It runs far back behind Lumi too, so the close shots looking back
+    // see a long boardwalk of lanterns fading into the haze.
+    final deck = Node(mesh: Mesh(CuboidGeometry(vm.Vector3(2.6, 0.12, 77)), plank));
+    deck.position = vm.Vector3(0, 0.0, -6.5);
     scene.add(deck);
+    final seams = InstancedMesh(
+      geometry: CuboidGeometry(vm.Vector3(2.6, 0.02, 0.03)),
+      material: unlit(0.03, 0.018, 0.025),
+      sortTransparentInstances: false,
+    );
+    for (var z = -45.0; z <= 32; z += 0.45) {
+      seams.addInstance(vm.Matrix4.translation(vm.Vector3(0, 0.065, z)));
+    }
+    scene.add(Node()..addComponent(InstancedMeshComponent(seams)));
     final bulbs = InstancedMesh(
       geometry: SphereGeometry(radius: 1, segments: 8, rings: 5),
       material: unlit(1, 1, 1),
       sortTransparentInstances: false,
     );
     final postGeo = CuboidGeometry(vm.Vector3(0.12, 1.0, 0.12));
-    for (var z = -3.0; z <= 32; z += 2.5) {
+    for (var z = -45.0; z <= 32; z += 2.5) {
       for (final x in [-1.3, 1.3]) {
         final post = Node(mesh: Mesh(postGeo, wood))..position = vm.Vector3(x, 0.45, z);
         scene.add(post);
@@ -280,6 +411,31 @@ class _FireworksShowState extends State<FireworksShow> {
     scene.add(bulbNode);
   }
 
+  /// Stars on a far dome, plus the moon's halo around the sky's moon disk.
+  void _stars(SparkBuilder b) {
+    final rnd = math.Random(17);
+    for (var i = 0; i < 260; i++) {
+      final d = vm.Vector3(rnd.nextDouble() * 2 - 1, 0.04 + rnd.nextDouble() * 0.9, 0.2 + rnd.nextDouble() * 0.8)
+        ..normalize();
+      b.add(
+        origin: d * 480,
+        start: -1000,
+        life: 1e5,
+        color: vm.Vector3(1.0, 0.95, 1.2) * (0.25 + rnd.nextDouble() * 0.6),
+        size: 0.8 + rnd.nextDouble() * 1.2,
+        kind: SparkKind.star,
+      );
+    }
+    b.add(
+      origin: _moonDir * 470,
+      start: -1000,
+      life: 1e5,
+      color: vm.Vector3(0.4, 0.36, 0.62),
+      size: 80,
+      kind: SparkKind.glow,
+    );
+  }
+
   int get chapterIndex {
     var i = 0;
     for (var k = 0; k < _chapters.length; k++) {
@@ -298,7 +454,11 @@ class _FireworksShowState extends State<FireworksShow> {
     vm.Vector3 v(List<double> a) => vm.Vector3(a[0], a[1], a[2]);
     // a slow drift inside each chapter keeps the camera alive
     final drift = vm.Vector3(math.sin(local * 2.4) * 0.6, local * 0.6, -local * 1.2);
-    final eye = v(prev.eye) + (v(c.eye) - v(prev.eye)) * blend + drift;
+    // Swinging between a shot behind Lumi and one in front of it arcs
+    // around Lumi instead of flying through it.
+    final turns = (prev.eye[2] < 1.6) != (c.eye[2] < 1.6);
+    final arc = turns ? vm.Vector3(math.sin(blend * math.pi) * 3.2, math.sin(blend * math.pi) * 0.8, 0) : vm.Vector3.zero();
+    final eye = v(prev.eye) + (v(c.eye) - v(prev.eye)) * blend + drift * (c.eye[2] < 1.6 ? 1.0 : 0.25) + arc;
     final target = v(prev.target) + (v(c.target) - v(prev.target)) * blend;
     camera = PerspectiveCamera(
       fovRadiansY: 50 * vm.degrees2Radians,
@@ -318,6 +478,14 @@ class _FireworksShowState extends State<FireworksShow> {
       }
     }
     _updateCamera();
+    _clock += dt;
+    sparks?.parameters.setFloat('time', t);
+    lagoon?.parameters.setFloat('time', _clock);
+    // Depth of field only for the shots framed on Lumi.
+    final ci = chapterIndex;
+    final dof = ci == 1 || ci == 4;
+    scene.depthOfField.enabled = dof;
+    if (dof) scene.depthOfField.focusDistance = camera.position.distanceTo(vm.Vector3(0.35, 2.0, 1.6));
     // Lumi watches the newest burst and glows in its light.
     final r = rig;
     if (r != null) {
@@ -335,8 +503,10 @@ class _FireworksShowState extends State<FireworksShow> {
         ..face = flash > 0.6 ? Face.surprised : (finale ? Face.happy : Face.idle)
         ..handsUp = finale ? 1 : 0
         ..glow = 1 + flash * 0.45
-        ..gaze = latest == null ? vm.Vector2(0, -0.6) : vm.Vector2((latest.x / 50).clamp(-1, 1), -0.9);
+        ..gaze = latest == null ? vm.Vector2(0, -0.6) : vm.Vector2((-latest.x / 50).clamp(-1, 1), -0.9);
       r.root.position = vm.Vector3(0.35, 1.45 + math.sin(t * 1.7) * 0.06, 1.6);
+      // Lumi faces the show (+Z); its face shows only when the camera is in front.
+      r.faceShown = camera.position.z > 1.6;
       r.update(dt);
     }
     frame.value++;
@@ -362,29 +532,10 @@ class _FireworksShowState extends State<FireworksShow> {
           size = Size(c.maxWidth, c.maxHeight);
           return Stack(
             children: [
-              Positioned.fill(
-                child: CustomPaint(
-                  painter: _SkyPainter(repaint: frame, state: this, shells: shells),
-                ),
-              ),
               if (rig != null)
                 Positioned.fill(
                   child: SceneView(scene, cameraBuilder: (_) => camera, onTick: (_, dt) => _tick(dt)),
                 ),
-              // vignette
-              const Positioned.fill(
-                child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: RadialGradient(
-                        radius: 1.1,
-                        colors: [Colors.transparent, Color(0x88080418)],
-                        stops: [0.6, 1],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
               Positioned(
                 top: pad.top + 6,
                 left: 8,
@@ -547,179 +698,4 @@ class _TrackPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _TrackPainter old) => old.f != f;
-}
-
-/// Sky, fireworks, and their reflections on the lagoon, painted behind the
-/// 3D scene and projected through the same camera.
-class _SkyPainter extends CustomPainter {
-  _SkyPainter({required Listenable repaint, required this.state, required this.shells})
-    : super(repaint: repaint);
-  final _FireworksShowState state;
-  final List<_Shell> shells;
-
-  static const _waterY = -0.35;
-  static const _g = -5.5;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final proj = Projector(state.camera, size);
-    final t = state.t;
-    final fov = state.camera.fovRadiansY;
-    final horizon = proj(0, _waterY, 2000)?.dy ?? size.height * 0.6;
-
-    // sky
-    canvas.drawRect(
-      Rect.fromLTRB(0, 0, size.width, horizon),
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: const [Color(0xFF1B0F45), Color(0xFF3A1F6E), Color(0xFF6A3A92)],
-          stops: const [0, 0.65, 1],
-        ).createShader(Rect.fromLTRB(0, 0, size.width, math.max(1, horizon))),
-    );
-    // water
-    canvas.drawRect(
-      Rect.fromLTRB(0, horizon, size.width, size.height),
-      Paint()
-        ..shader = const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF3A2266), Color(0xFF120A2A)],
-        ).createShader(Rect.fromLTRB(0, horizon, size.width, size.height)),
-    );
-    // stars
-    final rnd = math.Random(17);
-    for (var i = 0; i < 120; i++) {
-      final dir = vm.Vector3(rnd.nextDouble() * 2 - 1, rnd.nextDouble() * 0.9 + 0.05, 1);
-      final p = proj(dir.x * 500, dir.y * 500, 500);
-      if (p == null || p.dy > horizon) continue;
-      canvas.drawCircle(p, 0.6 + rnd.nextDouble(), Paint()..color = Colors.white.withValues(alpha: 0.5));
-    }
-
-    // smoke haze builds up during the show
-    final haze = (t / _showLength).clamp(0.0, 1.0);
-    final hazeRect = Rect.fromLTRB(0, horizon - size.height * 0.35, size.width, horizon);
-    canvas.drawRect(
-      hazeRect,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.bottomCenter,
-          end: Alignment.topCenter,
-          colors: [Color.fromRGBO(200, 150, 255, 0.10 + 0.16 * haze), const Color(0x00C896FF)],
-        ).createShader(hazeRect),
-    );
-
-    final add = Paint()..blendMode = BlendMode.plus;
-    final glowPaint = Paint()
-      ..blendMode = BlendMode.plus
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
-
-    canvas.save();
-    canvas.clipRect(Rect.fromLTRB(0, 0, size.width, horizon));
-    _drawShells(canvas, proj, t, fov, add, glowPaint, reflect: false, horizon: horizon);
-    canvas.restore();
-    canvas.save();
-    canvas.clipRect(Rect.fromLTRB(0, horizon, size.width, size.height));
-    _drawShells(canvas, proj, t, fov, add, glowPaint, reflect: true, horizon: horizon);
-    canvas.restore();
-  }
-
-  void _drawShells(
-    Canvas canvas,
-    Projector proj,
-    double t,
-    double fov,
-    Paint add,
-    Paint glow, {
-    required bool reflect,
-    required double horizon,
-  }) {
-    final alphaMul = reflect ? 0.35 : 1.0;
-    double ry(double y) => reflect ? 2 * _waterY - y : y;
-    for (final s in shells) {
-      if (t < s.launch || t > s.burst + s.life) continue;
-      if (t < s.burst) {
-        // rising comet with a short trail
-        final f = Curves.easeOutQuad.transform((t - s.launch) / _Shell.rise);
-        final y = f * s.height;
-        final p = proj(s.x, ry(y), s.z);
-        final p0 = proj(s.x, ry(math.max(0, y - 3)), s.z);
-        if (p == null || p0 == null) continue;
-        add
-          ..color = const Color(0xFFFFE0B0).withValues(alpha: 0.9 * alphaMul)
-          ..strokeWidth = 1.4;
-        canvas.drawLine(p0, p, add);
-        continue;
-      }
-      final age = t - s.burst;
-      final lifeF = age / s.life;
-      final fade = (1 - lifeF).clamp(0.0, 1.0);
-      final willow = s.kind == _Kind.willow;
-      final k = willow ? 1.6 : 1.15;
-      final speed = (willow ? 17.0 : 23.0) * s.scale;
-      final grav = willow ? _g * 1.4 : _g;
-      final spread = (1 - math.exp(-k * age)) / k;
-      final spread0 = (1 - math.exp(-k * math.max(0, age - (willow ? 0.6 : 0.18)))) / k;
-      final bx = s.x, by = s.height, bz = s.z;
-
-      // flash at the burst
-      if (age < 0.35) {
-        final c = proj(bx, ry(by), bz);
-        if (c != null) {
-          final sc = proj.scaleAt(bx, by, bz, fov);
-          glow.color = s.colors.first.withValues(alpha: (1 - age / 0.35) * 0.35 * alphaMul);
-          canvas.drawCircle(c, 3.5 * sc * s.scale, glow);
-        }
-      }
-
-      for (var i = 0; i < s.dirs.length; i++) {
-        final d = s.dirs[i];
-        final col = s.colors[i % s.colors.length];
-        final x = bx + d.x * speed * spread;
-        final y = by + d.y * speed * spread + 0.5 * grav * age * age;
-        final z = bz + d.z * speed * spread;
-        final p = proj(x, ry(y), z);
-        if (p == null) continue;
-        final a0 = math.max(0.0, age - (willow ? 0.6 : 0.18));
-        final x0 = bx + d.x * speed * spread0;
-        final y0 = by + d.y * speed * spread0 + 0.5 * grav * a0 * a0;
-        final z0 = bz + d.z * speed * spread0;
-        final q = proj(x0, ry(y0), z0);
-        var a = fade;
-        if (s.kind == _Kind.glitter) {
-          a *= (math.sin(age * 40 + i * 1.7) > 0.2) ? 1 : 0.15;
-        }
-        a *= alphaMul;
-        if (q != null) {
-          add
-            ..color = col.withValues(alpha: a * (willow ? 0.55 : 0.7))
-            ..strokeWidth = willow ? 1.2 : 1.6
-            ..strokeCap = StrokeCap.round;
-          canvas.drawLine(q, p, add);
-        }
-        add.color = col.withValues(alpha: a);
-        canvas.drawCircle(p, (willow ? 1.5 : 2.1) * (1.2 - lifeF * 0.5), add);
-        if (s.kind == _Kind.palm) {
-          // palms trail sparks behind each arm
-          for (var j = 1; j < 6; j++) {
-            final aj = math.max(0.0, age - j * 0.08);
-            final sj = (1 - math.exp(-k * aj)) / k;
-            final pj = proj(
-              bx + d.x * speed * sj,
-              ry(by + d.y * speed * sj + 0.5 * grav * aj * aj),
-              bz + d.z * speed * sj,
-            );
-            if (pj != null) {
-              add.color = col.withValues(alpha: a * (1 - j / 6));
-              canvas.drawCircle(pj, 1.6, add);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _SkyPainter old) => false;
 }

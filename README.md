@@ -13,8 +13,12 @@ The header stars Lumi, a little 3D lantern spirit rendered live with [Flutter Sc
   - Scroll the feed and Lumi rides the scrollbar.
 - **Home feed**: search, tonight's fireworks, a nearby reward (send Lumi to fetch the key), weather
   (rain brings an umbrella, snow brings a snowman), a photo booth, games, the park map, wait times and dining.
-- **Wardrobe**: swap friends (Lumi, Juju, Mochi, Nova), hats, colors and glow.
+- **Wardrobe**: swap friends (Lumi, Juju, Mochi, Nova), hats, colors and glow. Swaps, tricks and found
+  keys fire 3D spark bursts (`lib/scene/fx.dart`) that bloom over the UI.
 - **Fireworks over the lagoon**: a 60 second 3D show with a scrubbable timeline and camera chapters.
+  Every spark, trail and smoke puff is one mesh moved on the GPU by `assets/materials/sparks.fmat`
+  (motion is a function of time, so scrubbing is free). The lagoon mirrors the scene with a planar
+  reflector and `lagoon.fmat`, with bloom, purple haze and depth of field on the close shots.
 - **Lumi's room**: an orbitable floating island room. Tap a hat to wear it, or tap the cushion for a nap.
 - **Park map**: a 3D island with live waits. Lumi hops over to the ride with the shortest wait.
 - **Games**: Star Catch (45 seconds of falling stars) and Sky Lift (float as high as you can, up to the moon).
@@ -38,7 +42,7 @@ For a native release build, pass `--enable-flutter-gpu` too, or set `FLTEnableFl
 
 ## Layout
 
-- `lib/scene/` holds the 3D rig for Lumi and friends, plus the screen-to-world mapping.
+- `lib/scene/` holds the 3D rig for Lumi and friends, the spark effects, and the screen-to-world mapping.
 - `lib/lumi/lumi_brain.dart` holds Lumi's behaviour: petting, sleep, notifications, riding and speech.
 - `lib/home/` holds the home page, feed cards and wardrobe.
 - `lib/screens/` holds the fireworks show, room, park map and games.

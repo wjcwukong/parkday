@@ -1,0 +1,161 @@
+// Fireworks-style sparks whose motion is a pure function of time, so a whole
+// show (or a burst on the home screen) is one static mesh and one `time`
+// parameter: scrubbing the timeline is free and nothing is simulated on the
+// CPU.
+//
+// Every spark is one quad (four vertices sharing the same data):
+//   position   launch point (object space)
+//   normal     launch velocity
+//   uv         quad corner: x across (-1..1), y tail (0) to head (1)
+//   uv1        x start time, y lifetime (seconds)
+//   color      rgb light (HDR), a half width in object units
+//   tangent    x drag, y gravity, z trail length (seconds), w kind
+//
+// Kinds: 0 spark, 1 glitter (crackles as it dies), 2 flash, 3 smoke,
+// 4 rising comet, 5 twinkling star, 6 shockwave ring, 7 steady glow.
+// Kinds 0, 1 and 4 are drawn as streaks from where the spark was `trail`
+// seconds ago to where it is now (a motion-blurred trail); the rest are
+// camera-facing billboards. Output is additive HDR light, so bloom turns it
+// into glow.
+material {
+  name: "Sparks",
+  shading_model: unlit,
+  blending: additive,
+  culling: none,
+  depth_write: false,
+  parameters: [
+    { type: float, name: time, default: 0.0 },
+    { type: float, name: gain, default: 1.0 },
+    { type: float, name: size_scale, default: 1.0 },
+  ],
+  varyings: [
+    { type: vec3, name: shape },
+    { type: vec4, name: light },
+  ],
+}
+
+vertex {
+  vec3 SparkPath(vec3 o, vec3 v, float drag, float g, float a) {
+    float s = drag > 0.001 ? (1.0 - exp(-drag * a)) / drag : a;
+    return o + v * s + vec3(0.0, 0.5 * g * a * a, 0.0);
+  }
+
+  float SparkHash(vec3 p) {
+    return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+  }
+
+  void Vertex(inout VertexInputs vertex) {
+    vec2 corner = vertex.uv;
+    float start = vertex.uv1.x;
+    float life = max(vertex.uv1.y, 0.001);
+    vec4 prm = vertex.tangent;
+    float kind = floor(prm.w + 0.5);
+    float age = material_params.time - start;
+    float a = clamp(age, 0.0, life);
+    float f = a / life;
+    float alive = step(0.0, age) * step(age, life);
+
+    vec3 o = vertex.position;
+    vec3 v = vertex.normal;
+    mat4 m = vertex.model_transform;
+    float unit = length(m[0].xyz);
+    float w = vertex.color.a * material_params.size_scale * unit;
+    float seed = SparkHash(o * 1.7 + v * 3.1);
+
+    vec3 head = (m * vec4(SparkPath(o, v, prm.x, prm.y, a), 1.0)).xyz;
+    vec3 view = normalize(vertex.camera_position - head);
+
+    bool board = kind > 1.5 && kind < 3.5 || kind > 4.5;
+    vec3 p;
+    if (board) {
+      if (kind < 2.5) w *= 0.55 + 0.45 * min(age * 9.0, 1.0);
+      if (kind > 2.5 && kind < 3.5) w *= mix(0.4, 1.0, sqrt(f));
+      if (kind > 5.5 && kind < 6.5) w *= 1.0 - exp(-age * 6.0);
+      vec3 side = cross(vec3(0.0, 1.0, 0.0), view);
+      side = length(side) > 1e-4 ? normalize(side) : vec3(1.0, 0.0, 0.0);
+      vec3 up = cross(view, side);
+      float y = corner.y * 2.0 - 1.0;
+      p = head + (side * corner.x + up * y) * w;
+      shape = vec3(corner.x, y, 0.0);
+    } else {
+      vec3 tail = (m * vec4(SparkPath(o, v, prm.x, prm.y, max(0.0, a - prm.z)), 1.0)).xyz;
+      vec3 dir = head - tail;
+      float len = length(dir);
+      vec3 axis = len > 1e-5 ? dir / len : vec3(0.0, 1.0, 0.0);
+      vec3 side = cross(axis, view);
+      side = length(side) > 1e-4 ? normalize(side) : vec3(1.0, 0.0, 0.0);
+      float l = len / max(w, 1e-5);
+      float along = mix(-1.0, l + 1.0, corner.y);
+      p = tail + axis * along * w + side * corner.x * w;
+      shape = vec3(corner.x, along, l);
+    }
+
+    // Brightness over the spark's life.
+    vec3 c = vertex.color.rgb;
+    float b = 1.0;
+    if (kind < 0.5) {
+      float hot = exp(-age * 5.0);
+      c = mix(c, vec3(max(c.r, max(c.g, c.b))), hot * 0.5);
+      b = pow(1.0 - f, 1.4) * (1.0 + hot * 1.5);
+    } else if (kind < 1.5) {
+      float flick = step(0.45, fract(sin(floor(age * 16.0) * 7.13 + seed * 91.0) * 437.58));
+      b = (1.0 - f) * mix(1.0, 0.1 + 1.4 * flick, smoothstep(0.25, 0.45, f));
+    } else if (kind < 2.5) {
+      b = exp(-age * 7.0);
+    } else if (kind < 3.5) {
+      b = smoothstep(0.0, 0.5, age) * (1.0 - f) * (1.0 - f);
+    } else if (kind < 4.5) {
+      b = 0.8 + 0.2 * sin(age * 70.0 + seed * 6.0);
+    } else if (kind < 5.5) {
+      b = 0.55 + 0.45 * sin(material_params.time * (1.5 + seed * 2.0) + seed * 40.0);
+    } else if (kind < 6.5) {
+      b = pow(1.0 - f, 1.6);
+    }
+
+    light = vec4(c * b * alive * material_params.gain, kind);
+    // Dead sparks collapse to a point and draw nothing.
+    vertex.world_position = alive > 0.5 ? p : head;
+  }
+}
+
+fragment {
+  void Surface(inout MaterialInputs material) {
+    float kind = floor(light.a + 0.5);
+    vec3 s = shape;
+    float glow;
+    if (kind > 6.5) {
+      // A steady soft glow with a small bright disk (the moon).
+      float r2 = dot(s.xy, s.xy);
+      float r = sqrt(r2);
+      glow = (exp(-r2 * 4.0) * 0.5 + exp(-r2 * 30.0) * 0.5) * (1.0 - smoothstep(0.7, 1.0, r));
+      glow += (1.0 - smoothstep(0.03, 0.042, r)) * 5.0;
+    } else if (kind > 5.5) {
+      // A thin bright ring with a soft halo.
+      float r = length(s.xy);
+      float d = (r - 0.82) / 0.05;
+      glow = exp(-d * d) * 1.6 + exp(-abs(r - 0.82) * 9.0) * 0.35;
+      glow *= 1.0 - smoothstep(0.92, 1.0, r);
+    } else if (kind > 4.5 || kind > 1.5 && kind < 2.5) {
+      // Flash and stars: a hot core in a wide halo.
+      float r2 = dot(s.xy, s.xy);
+      glow = exp(-r2 * 24.0) * 1.5 + exp(-r2 * 5.0) * 0.45;
+      glow *= 1.0 - smoothstep(0.8, 1.0, sqrt(r2));
+    } else if (kind > 2.5 && kind < 3.5) {
+      // Smoke: a soft lit puff.
+      float r2 = dot(s.xy, s.xy);
+      glow = exp(-r2 * 3.0) * (1.0 - smoothstep(0.7, 1.0, sqrt(r2)));
+    } else {
+      // A streak: a capsule that fades from the head back along the trail,
+      // with a bright dot at the head.
+      float l = s.z;
+      float along = clamp(s.y, 0.0, l);
+      vec2 d = vec2(s.x, s.y - along);
+      float r2 = dot(d, d);
+      float t = l > 1e-3 ? along / l : 1.0;
+      vec2 h = vec2(s.x, s.y - l);
+      glow = exp(-r2 * 6.0) * t * t * 0.8 + exp(-dot(h, h) * 3.0) * 1.1;
+      glow *= 1.0 - smoothstep(0.85, 1.0, abs(s.x));
+    }
+    material.base_color = vec4(light.rgb * glow, 1.0);
+  }
+}

@@ -213,6 +213,10 @@ class LumiRig {
   bool showUmbrella = false;
   bool showSnowman = false;
 
+  /// Whether the face is drawn. The glass doesn't hide what is behind it,
+  /// so a camera behind Lumi would see the face through its head.
+  bool faceShown = true;
+
   /// Where the head was last poked, in head space (unit vector, -Z faces
   /// the camera). [pokeHead] presses it in; it springs back on its own.
   final vm.Vector3 _pokeDir = vm.Vector3(0, 0, -1);
@@ -524,16 +528,18 @@ class LumiRig {
     final eyeSize = 0.17 * (r / 0.56);
     _shapesL.show(shapeL, eyeL.position, eyeSize, _time, 1);
     _shapesR.show(shapeR, eyeR.position, eyeSize, _time, -1);
-    eyeL.visible = shapeL == EyeShape.oval;
-    eyeR.visible = shapeR == EyeShape.oval;
+    eyeL.visible = faceShown && shapeL == EyeShape.oval;
+    eyeR.visible = faceShown && shapeR == EyeShape.oval;
+    _shapesL.node.visible = faceShown;
+    _shapesR.node.visible = faceShown;
 
     // A drawn smile unless the mouth is open.
     final open = switch (face) {
       Face.surprised || Face.munch || Face.talk || Face.dizzy => true,
       _ => false,
     };
-    mouth.visible = open;
-    smile.visible = !open;
+    mouth.visible = faceShown && open;
+    smile.visible = faceShown && !open;
     smile.position = onHead(0, -r * 0.24, 0.04);
     final sw = 0.13 * (r / 0.56) * (0.7 + 0.3 * _mouth.x);
     smile.scale = vm.Vector3(sw, sw * (0.55 + 0.25 * _mouth.y), sw);

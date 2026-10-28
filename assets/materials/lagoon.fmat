@@ -1,0 +1,57 @@
+// The lagoon: a dark, still surface that mirrors the show. A
+// PlanarReflectorComponent renders the mirrored scene each frame; this
+// samples it with a little ripple and a short vertical smear, the way lights
+// stretch into streaks on rippled water at night.
+material {
+  name: "Lagoon",
+  shading_model: lit,
+  engine_inputs: [ planar_reflection ],
+  parameters: [
+    { type: float, name: time, default: 0.0 },
+    { type: vec3, name: deep, default: [0.012, 0.008, 0.035] },
+    { type: float, name: strength, default: 0.8 },
+  ],
+}
+
+fragment {
+  #include <noise.glsl>
+
+  void Surface(inout MaterialInputs material) {
+    vec3 wp = GetWorldPosition();
+    vec3 v = normalize(GetViewDirection());
+    float t = material_params.time;
+
+    material.base_color = vec4(material_params.deep, 1.0);
+    material.metallic = 0.0;
+    material.roughness = 1.0;
+    material.specular = 0.0;
+
+    if (planar_reflection_info.params.x < 0.5) {
+      return;
+    }
+    vec4 clip = planar_reflection_info.view_projection * vec4(wp, 1.0);
+    if (clip.w <= 0.0) {
+      return;
+    }
+    vec2 uv = vec2(0.5 + 0.5 * clip.x / clip.w, 0.5 - 0.5 * clip.y / clip.w);
+
+    // Ripples: long, low swells across the view plus finer chop, scaled down
+    // with distance so the far water stays glassy.
+    float far = clamp(length(wp.xz) / 160.0, 0.0, 1.0);
+    float n1 = NoiseSimplex3(vec3(wp.x * 0.25, wp.z * 1.2, t * 0.5), 3);
+    float n2 = NoiseSimplex3(vec3(wp.x * 1.1, wp.z * 3.5, t * 1.2), 5);
+    vec2 rip = vec2(n1 * 0.006 + n2 * 0.003, n2 * 0.003) * (1.0 - 0.7 * far);
+
+    vec3 refl = vec3(0.0);
+    for (int k = -3; k <= 3; k++) {
+      float w = 1.0 - abs(float(k)) / 4.0;
+      vec2 u = clamp(uv + rip + vec2(0.0, float(k) * 0.005), vec2(0.001), vec2(0.999));
+      refl += texture(planar_reflection, u).rgb * w;
+    }
+    refl /= 4.0;
+
+    // More mirror-like at grazing angles.
+    float fres = 0.3 + 0.7 * pow(1.0 - clamp(v.y, 0.0, 1.0), 5.0);
+    material.emissive = refl * fres * material_params.strength;
+  }
+}

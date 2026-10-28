@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
+import '../scene/fx.dart';
 import '../scene/lumi_rig.dart';
 import '../scene/space.dart';
 
@@ -30,16 +31,6 @@ class ParkNote {
   bool done = false;
 }
 
-/// A burst of 2D sparkles painted around Lumi (tricks, friend swaps, keys).
-class Burst {
-  Burst(this.center, this.color, {this.rings = 1, this.count = 28});
-  final Offset center;
-  final Color color;
-  final int rings;
-  final int count;
-  double age = 0;
-}
-
 /// Everything Lumi does on the home screen.
 ///
 /// The brain owns the overlay [scene], decides what Lumi should be doing
@@ -51,6 +42,7 @@ class LumiBrain extends ChangeNotifier {
   final Scene scene = Scene();
   LumiRig? rig;
   Sparks? sparks;
+  HomeFx? fx;
   ScreenSpace? space;
   bool get ready => rig != null;
 
@@ -73,7 +65,6 @@ class LumiBrain extends ChangeNotifier {
   bool listening = false;
 
   final notes = <ParkNote>[];
-  final bursts = <Burst>[];
   final zzz = <_Zed>[];
   final hearts = <_Heart>[];
 
@@ -134,6 +125,9 @@ class LumiBrain extends ChangeNotifier {
       bloomScatter: 0.62,
     );
     scene.add(_backdrop());
+    // Compile the spark material up front so the first burst is instant.
+    await loadFmatMaterial('assets/materials/sparks.fmat');
+    fx = HomeFx(scene);
     final r = await LumiRig.create();
     scene.add(r.root);
     final s = Sparks(
@@ -298,7 +292,12 @@ class LumiBrain extends ChangeNotifier {
     _pendingFriend = f;
     _swapT = 0.28;
     _scaleTarget = 0.05;
+    final style = FriendStyle.styles[f]!;
+    fx?.shockwave(_world(_pos, -0.7), style.rim * 0.6 + style.tint * 0.4);
   }
+
+  /// Lumi's spot in the overlay scene, nudged towards the camera by [z].
+  vm.Vector3 _world(Offset p, [double z = 0]) => space?.toWorld(p, z) ?? vm.Vector3.zero();
 
   void setHat(Hat h) {
     hat = h;
@@ -352,7 +351,7 @@ class LumiBrain extends ChangeNotifier {
     }
     _trickT = 1.1;
     _vel += const Offset(0, -320);
-    bursts.add(Burst(_pos, const Color(0xFFFFD27A), rings: 2, count: 36));
+    fx?.sparkle(_world(_pos), vm.Vector3(1.0, 0.62, 0.2));
     _setStatus('Ta-da!', 2.5);
   }
 
@@ -422,7 +421,7 @@ class LumiBrain extends ChangeNotifier {
     keys++;
     _cheerT = 1.4;
     _trickT = 0.8;
-    bursts.add(Burst(_pos, const Color(0xFFFFC34D), rings: 2, count: 40));
+    fx?.sparkle(_world(_pos), vm.Vector3(1.0, 0.7, 0.18), count: 110, power: 1.25);
     _starryT = 2.2;
     _setStatus('Key found! $keys of 5 collected', 4);
     notifyListeners();
@@ -538,7 +537,6 @@ class LumiBrain extends ChangeNotifier {
         r.setTint(tints[colorIndex]);
         r.setOrbColor(glows[glowIndex]);
         _scaleTarget = 1;
-        bursts.add(Burst(_pos, const Color(0xFFFFE3A3), count: 30));
         _setStatus('Hi, I’m ${FriendStyle.styles[friend]!.name}!', 3);
         _cheerT = 0.8;
         notifyListeners();
@@ -695,11 +693,9 @@ class LumiBrain extends ChangeNotifier {
       sparks!.area = vm.Aabb3.minMax(vm.Vector3(top.x, bottom.y, -0.6), vm.Vector3(bottom.x, top.y, 2.5));
     }
 
+    fx?.update(dt);
+
     // 2D particles
-    for (final b in bursts) {
-      b.age += dt;
-    }
-    bursts.removeWhere((b) => b.age > 1.4);
     for (final z in zzz) {
       z.age += dt;
     }
@@ -756,7 +752,7 @@ class LumiBrain extends ChangeNotifier {
       Future.delayed(const Duration(milliseconds: 160), () => rig?.squashY = 0.92);
       Future.delayed(const Duration(milliseconds: 320), () => rig?.squashY = 1.0);
       _setStatus(n.after, 4);
-      bursts.add(Burst(mouth, const Color(0xFFFFB86B), count: 14));
+      fx?.puff(_world(mouth), vm.Vector3(1.0, 0.6, 0.25));
     }
   }
 
