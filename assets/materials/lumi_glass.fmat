@@ -1,0 +1,56 @@
+// Lumi's body: a glowing soap-bubble glass. Unlit so the look is fully
+// art-directed: a translucent tinted core, a bright fresnel rim, a soft
+// key highlight, and slowly swirling inner light.
+material {
+  name: "LumiGlass",
+  shading_model: unlit,
+  blending: alpha,
+  culling: back,
+  depth_write: true,
+  parameters: [
+    { type: vec4, name: tint, default: [0.32, 0.6, 1.0, 1.0] },
+    { type: vec3, name: rim_color, default: [0.75, 0.9, 1.0] },
+    { type: float, name: glow, default: 1.0 },
+    { type: float, name: blush, default: 0.0 },
+    { type: float, name: swirl, default: 1.0 },
+    { type: float, name: opacity, default: 1.0 },
+    { type: float, name: time, default: 0.0 },
+  ],
+}
+
+fragment {
+  void Surface(inout MaterialInputs material) {
+    vec3 n = normalize(GetWorldNormal());
+    vec3 v = normalize(GetViewDirection());
+    float ndv = clamp(dot(n, v), 0.0, 1.0);
+    float rim = pow(1.0 - ndv, 3.0);
+    float t = material_params.time;
+
+    // Slow swirling light inside the bubble.
+    vec3 p = GetWorldPosition() * 3.2;
+    float s = sin(p.x * 1.7 + t * 0.6) * sin(p.y * 2.1 - t * 0.45) +
+              0.5 * sin((p.x + p.y) * 3.3 + t * 0.9);
+    float mottling = (0.5 + 0.5 * s) * material_params.swirl;
+
+    // Key highlight from the upper left, toward the camera.
+    vec3 key = normalize(vec3(-0.45, 0.65, -0.6));
+    float spec = pow(max(dot(reflect(-v, n), key), 0.0), 40.0);
+    float sheen = pow(max(dot(n, key), 0.0), 3.0);
+
+    vec3 tint = material_params.tint.rgb;
+    // Darker toward the lower right, like light pooling inside the glass.
+    float shade = 0.5 + 0.5 * dot(n, normalize(vec3(-0.4, 0.7, -0.5)));
+    vec3 col = tint * (0.42 + 0.22 * mottling + 0.38 * shade + 0.25 * sheen);
+    col += material_params.rim_color * rim * 1.1;
+    col += vec3(1.0) * spec * 1.2;
+    col *= material_params.glow;
+
+    // Cheek blush when petted.
+    float cheeks = smoothstep(0.35, 0.0, abs(n.y + 0.08)) *
+                   smoothstep(0.25, 0.75, abs(n.x)) * step(n.z, 0.0);
+    col = mix(col, vec3(1.0, 0.45, 0.55) * 1.3, cheeks * material_params.blush * 0.7);
+
+    float alpha = mix(0.86, 1.0, rim) * material_params.opacity;
+    material.base_color = vec4(col, alpha);
+  }
+}
