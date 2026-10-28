@@ -12,7 +12,7 @@ enum Friend { lumi, juju, mochi, nova }
 enum Hat { none, starSprout, beanie, flowerCrown, headphones, catEars }
 
 /// Facial expressions, blended smoothly by [LumiRig.update].
-enum Face { idle, happy, sleepy, asleep, surprised, munch, dizzy, wink, talk }
+enum Face { idle, happy, sleepy, asleep, surprised, munch, dizzy, wink, talk, starry }
 
 class FriendStyle {
   const FriendStyle({
@@ -72,10 +72,67 @@ class FriendStyle {
 }
 
 /// Shared geometry so that every rig (home, room, games) reuses buffers.
+/// The drawn eye shapes, unit sized in the XY plane (facing -Z).
+enum EyeShape { oval, arcUp, arcDown, star, swirl }
+
+class _EyeShapes {
+  _EyeShapes(Material mat) {
+    for (final shape in [EyeShape.arcUp, EyeShape.arcDown, EyeShape.star, EyeShape.swirl]) {
+      final geo = switch (shape) {
+        EyeShape.arcUp => _Geo.arcUp,
+        EyeShape.arcDown => _Geo.arcDown,
+        EyeShape.star => _Geo.star,
+        _ => _Geo.swirl,
+      };
+      final n = Node(mesh: Mesh(geo, mat))..visible = false;
+      _nodes[shape] = n;
+      node.add(n);
+    }
+  }
+
+  final Node node = Node(name: 'eye shapes');
+  final Map<EyeShape, Node> _nodes = {};
+
+  void show(EyeShape shape, vm.Vector3 at, double size, double time, double side) {
+    _nodes.forEach((k, n) => n.visible = k == shape);
+    node.position = at;
+    node.scale = vm.Vector3.all(size);
+    node.rotation = switch (shape) {
+      EyeShape.swirl => vm.Quaternion.axisAngle(vm.Vector3(0, 0, 1), time * 7 * side),
+      EyeShape.star => vm.Quaternion.axisAngle(vm.Vector3(0, 0, 1), math.sin(time * 3) * 0.2),
+      _ => vm.Quaternion.identity(),
+    };
+  }
+}
+
 class _Geo {
   static final sphereHi = SphereGeometry(radius: 1, segments: 48, rings: 24);
   static final sphere = SphereGeometry(radius: 1, segments: 24, rings: 12);
   static final sphereLo = SphereGeometry(radius: 1, segments: 10, rings: 6);
+
+  // Expression strokes, unit sized and flat on the XY plane.
+  static final arcUp = _stroke([for (var i = 0; i <= 8; i++) _arcPoint(math.pi * i / 8, 0.42, 0.34, -0.12)]);
+  static final arcDown = _stroke([
+    for (var i = 0; i <= 8; i++) _arcPoint(math.pi + math.pi * i / 8, 0.42, 0.2, 0.08),
+  ]);
+  static final smile = _stroke([
+    for (var i = 0; i <= 8; i++) _arcPoint(math.pi * 1.12 + math.pi * 0.76 * i / 8, 0.5, 0.42, 0.2),
+  ], 0.1);
+  static final star = _starGeometry(0.62, 0.28, 0.1);
+  static final swirl = _stroke([
+    for (var i = 0; i <= 28; i++)
+      vm.Vector3(
+        math.cos(i / 28 * math.pi * 3.5) * (0.06 + 0.42 * i / 28),
+        math.sin(i / 28 * math.pi * 3.5) * (0.06 + 0.42 * i / 28),
+        0,
+      ),
+  ], 0.075);
+
+  static vm.Vector3 _arcPoint(double a, double rx, double ry, double dy) =>
+      vm.Vector3(math.cos(a) * rx, math.sin(a) * ry + dy, 0);
+
+  static Geometry _stroke(List<vm.Vector3> pts, [double radius = 0.11]) =>
+      TubeGeometry(CatmullRomPath(pts), radius: radius, radialSegments: 8, stations: pts.length * 4);
 }
 
 UnlitMaterial unlit(double r, double g, double b, [double a = 1]) {
@@ -128,13 +185,15 @@ class LumiRig {
   final PreprocessedMaterial headMat;
   final PreprocessedMaterial bodyMat;
   final orbMat = unlit(2.0, 0.45, 0.1);
-  final eyeMat = unlit(3.2, 3.5, 4.0);
-  final mouthMat = unlit(2.6, 2.9, 3.4);
+  final eyeMat = unlit(5.0, 5.4, 6.0);
+  final mouthMat = unlit(4.0, 4.4, 5.0);
 
   final Node root = Node(name: 'lumi');
   final Node squash = Node(name: 'squash');
   final Node headPivot = Node(name: 'head');
   late final Node head, body, handL, handR, foot, eyeL, eyeR, mouth, hatSlot;
+  late final _EyeShapes _shapesL, _shapesR;
+  late final Node smile;
   late final Node ring, umbrella, snowman;
   final Map<Hat, Node> hats = {};
 
@@ -153,6 +212,25 @@ class LumiRig {
   double handsUp = 0.0; // 0 rest, 1 raised (cheering / holding)
   bool showUmbrella = false;
   bool showSnowman = false;
+
+  /// Where the head was last poked, in head space (unit vector, -Z faces
+  /// the camera). [pokeHead] presses it in; it springs back on its own.
+  final vm.Vector3 _pokeDir = vm.Vector3(0, 0, -1);
+  double _pokeTarget = 0, _poke = 0, _pokeVel = 0;
+  double _jiggle = 0;
+
+  /// Dents the head toward [dir] (head space) and sets it wobbling.
+  void pokeHead(vm.Vector3 dir, {double depth = 1}) {
+    _pokeDir.setFrom(dir.normalized());
+    _pokeTarget = depth;
+    _jiggle = math.max(_jiggle, 0.6 * depth);
+  }
+
+  /// Releases a held poke so the dent springs back.
+  void releasePoke() => _pokeTarget = 0;
+
+  /// Adds a little wobble without a dent (petting, landing, swaps).
+  void wobble([double amount = 0.35]) => _jiggle = math.max(_jiggle, amount);
 
   // ---- smoothed state ----
   double _glow = 1, _blush = 0, _sq = 1, _tilt = 0, _spin = 0, _hands = 0;
@@ -175,10 +253,16 @@ class LumiRig {
     eyeL = ball(eyeMat, 1);
     eyeR = ball(eyeMat, 1);
     mouth = ball(mouthMat, 1);
+    _shapesL = _EyeShapes(eyeMat);
+    _shapesR = _EyeShapes(eyeMat);
+    smile = Node(mesh: Mesh(_Geo.smile, mouthMat));
     headPivot
       ..add(eyeL)
       ..add(eyeR)
-      ..add(mouth);
+      ..add(mouth)
+      ..add(_shapesL.node)
+      ..add(_shapesR.node)
+      ..add(smile);
     hatSlot = Node(name: 'hat');
     headPivot.add(hatSlot);
 
@@ -217,7 +301,7 @@ class LumiRig {
         ..setVec3('rim_color', s.rim)
         ..setFloat('swirl', s.swirl);
     }
-    orbMat.baseColorFactor = vm.Vector4(s.orb.x, s.orb.y, s.orb.z, 1);
+    _setOrb(s.orb);
     ring.visible = f == Friend.nova;
     head.scale = vm.Vector3.all(s.headRadius);
     body.scale = vm.Vector3.all(s.bodyRadius);
@@ -236,8 +320,17 @@ class LumiRig {
 
   /// Overrides the orb color (wardrobe "Glow").
   void setOrbColor(vm.Vector3? c) {
-    final o = c ?? style.orb;
-    orbMat.baseColorFactor = vm.Vector4(o.x, o.y, o.z, 1);
+    _setOrb(c ?? style.orb);
+  }
+
+  // The orbs render well above 1.0 so bloom gives them their halo; the
+  // light they cast into the jelly uses the plain color.
+  final vm.Vector3 _orbColor = vm.Vector3(2.0, 0.45, 0.1);
+  static const double _orbBoost = 2.0;
+
+  void _setOrb(vm.Vector3 o) {
+    _orbColor.setFrom(o);
+    orbMat.baseColorFactor = vm.Vector4(o.x * _orbBoost, o.y * _orbBoost, o.z * _orbBoost, 1);
   }
 
   Hat _hat = Hat.none;
@@ -311,12 +404,24 @@ class LumiRig {
     _umbrella = _lerp(_umbrella, showUmbrella ? 1 : 0, kSlow);
     _snow = _lerp(_snow, showSnowman ? 1 : 0, kSlow);
 
+    // The dent follows a springy target so a released poke overshoots and
+    // settles, and the jiggle fades out.
+    for (var left = dt; left > 0; left -= 1 / 240) {
+      final h = math.min(left, 1 / 240);
+      _pokeVel += ((_pokeTarget - _poke) * 220 - _pokeVel * 14) * h;
+      _poke = (_poke + _pokeVel * h).clamp(-0.35, 1.0);
+    }
+    _jiggle = math.max(0, _jiggle - dt * 0.9);
+
     for (final m in [headMat, bodyMat]) {
       m.parameters
         ..setFloat('glow', _glow)
-        ..setFloat('blush', _blush)
-        ..setFloat('time', _time);
+        ..setFloat('blush', m == headMat ? _blush : 0)
+        ..setFloat('time', _time)
+        ..setFloat('jiggle', _jiggle);
     }
+    headMat.parameters.setVec4('poke', vm.Vector4(_pokeDir.x, _pokeDir.y, _pokeDir.z, _poke));
+    bodyMat.parameters.setVec4('poke', vm.Vector4(0, 0, -1, 0));
 
     // Squash & stretch preserves volume.
     final sx = 1 / math.sqrt(_sq);
@@ -337,8 +442,8 @@ class LumiRig {
     double ew = 1, eh = 1, lift = 0, mw = 1, mh = 1, rw = 1, rh = 1;
     switch (face) {
       case Face.idle:
-        mw = 0.9;
-        mh = 0.6;
+        mw = 1.2;
+        mh = 0.9;
       case Face.happy:
         eh = 0.32;
         lift = 0.03;
@@ -377,6 +482,9 @@ class LumiRig {
       case Face.talk:
         mw = 1.0;
         mh = 0.6 + 1.3 * (0.5 + 0.5 * math.sin(_time * 16) * math.sin(_time * 5.3));
+      case Face.starry:
+        mw = 1.4;
+        mh = 1.4;
     }
     final closed = face == Face.asleep;
     final bm = closed ? 1.0 : blinkMul;
@@ -389,18 +497,46 @@ class LumiRig {
     _mouth.y = _lerp(_mouth.y, mh, 1 - math.exp(-dt * 20));
 
     final r = s.headRadius;
-    vm.Vector3 onHead(double x, double y) {
-      final z = -math.sqrt(math.max(0.0, r * r - x * x - y * y)) + 0.012;
+    // Features sit just under the jelly's surface so it veils them.
+    vm.Vector3 onHead(double x, double y, [double inset = 0.045]) {
+      final z = -math.sqrt(math.max(0.0, r * r - x * x - y * y)) + inset;
       return vm.Vector3(x, y, z);
     }
 
     final ex = r * 0.29, ey = r * 0.04 + _eyeLift;
     eyeL.position = onHead(-ex, ey);
     eyeR.position = onHead(ex, ey);
-    eyeL.scale = vm.Vector3(0.075 * _eye.x, 0.1 * _eye.y, 0.035);
-    eyeR.scale = vm.Vector3(0.075 * _eyeR.x, 0.1 * _eyeR.y, 0.035);
-    mouth.position = onHead(0, -r * 0.27);
+    eyeL.scale = vm.Vector3(0.085 * _eye.x, 0.118 * _eye.y, 0.035);
+    eyeR.scale = vm.Vector3(0.085 * _eyeR.x, 0.118 * _eyeR.y, 0.035);
+    mouth.position = onHead(0, -r * 0.27, 0.04);
     mouth.scale = vm.Vector3(0.05 * _mouth.x, 0.02 * _mouth.y, 0.03);
+
+    // Drawn shapes take over from the ovals for some expressions: closed
+    // happy arcs, sleeping lids, spinning dizzy swirls and star eyes.
+    final (shapeL, shapeR) = switch (face) {
+      Face.happy => (EyeShape.arcUp, EyeShape.arcUp),
+      Face.asleep => (EyeShape.arcDown, EyeShape.arcDown),
+      Face.wink => (EyeShape.oval, EyeShape.arcUp),
+      Face.dizzy => (EyeShape.swirl, EyeShape.swirl),
+      Face.starry => (EyeShape.star, EyeShape.star),
+      _ => (EyeShape.oval, EyeShape.oval),
+    };
+    final eyeSize = 0.17 * (r / 0.56);
+    _shapesL.show(shapeL, eyeL.position, eyeSize, _time, 1);
+    _shapesR.show(shapeR, eyeR.position, eyeSize, _time, -1);
+    eyeL.visible = shapeL == EyeShape.oval;
+    eyeR.visible = shapeR == EyeShape.oval;
+
+    // A drawn smile unless the mouth is open.
+    final open = switch (face) {
+      Face.surprised || Face.munch || Face.talk || Face.dizzy => true,
+      _ => false,
+    };
+    mouth.visible = open;
+    smile.visible = !open;
+    smile.position = onHead(0, -r * 0.24, 0.04);
+    final sw = 0.13 * (r / 0.56) * (0.7 + 0.3 * _mouth.x);
+    smile.scale = vm.Vector3(sw, sw * (0.55 + 0.25 * _mouth.y), sw);
 
     // Hands hang by the body and lift when cheering; they bob out of phase.
     final hb = math.sin(_time * 2.1) * 0.03;
@@ -418,6 +554,22 @@ class LumiRig {
     snowman.visible = _snow > 0.02;
     snowman.scale = vm.Vector3.all(_snow.clamp(0.001, 1) * 1.3);
     snowman.position = vm.Vector3(1.35, -1.0 + math.sin(_time * 1.3) * 0.04, 0.2);
+
+    // The orbs light the jelly from inside.
+    final oc = _orbColor;
+    vm.Vector4 lamp(Node n) {
+      final p = n.globalTransform.getTranslation();
+      return vm.Vector4(p.x, p.y, p.z, 1);
+    }
+
+    final la = lamp(handL), lb = lamp(handR), lc = lamp(foot);
+    for (final m in [headMat, bodyMat]) {
+      m.parameters
+        ..setVec3('orb_color', vm.Vector3(oc.x, oc.y, oc.z))
+        ..setVec4('orb_a', la)
+        ..setVec4('orb_b', lb)
+        ..setVec4('orb_c', lc);
+    }
 
     if (ring.visible) {
       ring.rotation = vm.Quaternion.euler(0, 1.2, math.sin(_time * 0.7) * 0.25);

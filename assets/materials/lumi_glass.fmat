@@ -1,12 +1,18 @@
-// Lumi's body: a glowing soap-bubble glass. Unlit so the look is fully
-// art-directed: a translucent tinted core, a bright fresnel rim, a soft
-// key highlight, and slowly swirling inner light.
+// Lumi's body: a frosted, self-lit jelly. Unlit so the look is fully art
+// directed, and written as emitted light (HDR, premultiplied) so the scene's
+// bloom gives it a soft halo:
+//   - a pale core and a bright fresnel rim,
+//   - slowly drifting inner cells from simplex noise in object space,
+//   - warm light from the hand and foot orbs bleeding through the jelly,
+//   - a vertex dent where it is poked, plus a gentle jiggle.
+// It does not write depth, so the eyes and orbs inside or behind it glow
+// through.
 material {
   name: "LumiGlass",
   shading_model: unlit,
   blending: alpha,
   culling: back,
-  depth_write: true,
+  depth_write: false,
   parameters: [
     { type: vec4, name: tint, default: [0.32, 0.6, 1.0, 1.0] },
     { type: vec3, name: rim_color, default: [0.75, 0.9, 1.0] },
@@ -15,42 +21,97 @@ material {
     { type: float, name: swirl, default: 1.0 },
     { type: float, name: opacity, default: 1.0 },
     { type: float, name: time, default: 0.0 },
+    { type: vec3, name: orb_color, default: [2.0, 0.45, 0.1] },
+    { type: vec4, name: orb_a, default: [0.0, 0.0, 0.0, 0.0] },
+    { type: vec4, name: orb_b, default: [0.0, 0.0, 0.0, 0.0] },
+    { type: vec4, name: orb_c, default: [0.0, 0.0, 0.0, 0.0] },
+    { type: vec4, name: poke, default: [0.0, 0.0, -1.0, 0.0] },
+    { type: float, name: jiggle, default: 0.0 },
   ],
+  varyings: [ { type: vec3, name: obj_pos } ],
+}
+
+vertex {
+  void Vertex(inout VertexInputs vertex) {
+    vec3 p = vertex.position;
+    vec3 n = normalize(vertex.normal);
+    obj_pos = p;
+
+    // Poke: push the surface in around the touched direction.
+    vec4 pk = material_params.poke;
+    float near = smoothstep(0.3, 1.0, dot(normalize(p), normalize(pk.xyz)));
+    p -= n * near * near * pk.w * 0.3;
+
+    // Jiggle: a few travelling ripples over the surface.
+    float t = material_params.time;
+    float j = material_params.jiggle;
+    float w = sin(p.y * 5.0 + t * 17.0) * 0.6 + sin(p.x * 4.0 - t * 13.0) * 0.4;
+    p += n * w * j * 0.05;
+
+    vertex.world_position = (vertex.model_transform * vec4(p, 1.0)).xyz;
+  }
 }
 
 fragment {
+  #include <noise.glsl>
+
+  float OrbLight(vec4 orb, vec3 wp) {
+    vec3 d = wp - orb.xyz;
+    return orb.w * exp(-dot(d, d) / 0.05);
+  }
+
   void Surface(inout MaterialInputs material) {
     vec3 n = normalize(GetWorldNormal());
     vec3 v = normalize(GetViewDirection());
     float ndv = clamp(dot(n, v), 0.0, 1.0);
-    float rim = pow(1.0 - ndv, 3.0);
+    float rim = pow(1.0 - ndv, 2.2);
     float t = material_params.time;
+    vec3 wp = GetWorldPosition();
 
-    // Slow swirling light inside the bubble.
-    vec3 p = GetWorldPosition() * 3.2;
-    float s = sin(p.x * 1.7 + t * 0.6) * sin(p.y * 2.1 - t * 0.45) +
-              0.5 * sin((p.x + p.y) * 3.3 + t * 0.9);
-    float mottling = (0.5 + 0.5 * s) * material_params.swirl;
-
-    // Key highlight from the upper left, toward the camera.
-    vec3 key = normalize(vec3(-0.45, 0.65, -0.6));
-    float spec = pow(max(dot(reflect(-v, n), key), 0.0), 40.0);
-    float sheen = pow(max(dot(n, key), 0.0), 3.0);
+    // Drifting inner cells.
+    vec3 q = obj_pos * 1.35 + vec3(0.0, t * 0.1, t * 0.07);
+    float cells = NoiseSimplex3(q, 7) * 0.8 + NoiseSimplex3(q * 2.1, 11) * 0.2;
+    float mott = cells * material_params.swirl;
 
     vec3 tint = material_params.tint.rgb;
-    // Darker toward the lower right, like light pooling inside the glass.
-    float shade = 0.5 + 0.5 * dot(n, normalize(vec3(-0.4, 0.7, -0.5)));
-    vec3 col = tint * (0.42 + 0.22 * mottling + 0.38 * shade + 0.25 * sheen);
-    col += material_params.rim_color * rim * 1.1;
-    col += vec3(1.0) * spec * 1.2;
+    vec3 pale = mix(tint, vec3(0.8, 0.9, 1.0), 0.18);
+
+    // Frosted body: brighter through the thick middle, cells darken and
+    // lighten it.
+    vec3 col = mix(tint, pale, ndv * ndv) * (0.4 + 0.36 * ndv) * (1.0 + 0.3 * mott);
+
+    // Soft broad highlight from the upper left.
+    vec3 key = normalize(vec3(-0.45, 0.7, -0.55));
+    col += pale * pow(max(dot(n, key), 0.0), 5.0) * 0.25;
+
+    // Bright rim that blooms into a halo.
+    col += material_params.rim_color * rim * 1.45;
+
+    // Orb light seen through the jelly.
+    float orbs = OrbLight(material_params.orb_a, wp) +
+                 OrbLight(material_params.orb_b, wp) +
+                 OrbLight(material_params.orb_c, wp);
+    col += material_params.orb_color * orbs * 0.55;
+
+    // Pressed-in jelly reads darker, with a brighter lip around the dent.
+    vec4 pk = material_params.poke;
+    float near = smoothstep(0.3, 1.0, dot(normalize(obj_pos), normalize(pk.xyz)));
+    float dent = near * near * max(pk.w, 0.0);
+    col *= 1.0 - 0.45 * dent;
+    col += material_params.rim_color * smoothstep(0.0, 0.5, near) * (1.0 - near) * max(pk.w, 0.0) * 0.8;
+
     col *= material_params.glow;
 
     // Cheek blush when petted.
-    float cheeks = smoothstep(0.35, 0.0, abs(n.y + 0.08)) *
-                   smoothstep(0.25, 0.75, abs(n.x)) * step(n.z, 0.0);
-    col = mix(col, vec3(1.0, 0.45, 0.55) * 1.3, cheeks * material_params.blush * 0.7);
+    vec3 on = normalize(obj_pos);
+    float cheeks = smoothstep(0.35, 0.0, abs(on.y + 0.08)) *
+                   smoothstep(0.25, 0.75, abs(on.x)) * step(on.z, 0.0);
+    col = mix(col, vec3(1.0, 0.38, 0.5) * 1.1, cheeks * material_params.blush * 0.65);
 
-    float alpha = mix(0.86, 1.0, rim) * material_params.opacity;
-    material.base_color = vec4(col, alpha);
+    // Mostly emitted light: a thin veil in the middle, denser at the rim.
+    // The framework premultiplies, so dividing by the veil keeps the emitted
+    // light at col, and opacity fades both together.
+    float veil = clamp(0.3 + 0.5 * rim, 0.05, 0.92);
+    material.base_color = vec4(col / veil, veil * material_params.opacity);
   }
 }

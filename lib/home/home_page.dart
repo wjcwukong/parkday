@@ -12,6 +12,7 @@ import '../screens/park_map.dart';
 import '../screens/sky_lift.dart';
 import '../screens/star_catch.dart';
 import '../theme.dart';
+import '../widgets/light_layer.dart';
 import '../widgets/painters.dart';
 import 'feed.dart';
 import 'wardrobe.dart';
@@ -260,16 +261,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 ),
               ),
               // ---------------- Lumi ----------------
-              Positioned.fill(
-                child: IgnorePointer(child: CustomPaint(painter: LumiAuraPainter(brain))),
-              ),
               if (brain.ready && !paused)
                 Positioned.fill(
                   child: IgnorePointer(
-                    child: SceneView(
-                      brain.scene,
-                      camera: brain.space!.camera,
-                      onTick: (_, dt) => brain.tick(dt),
+                    child: LightLayer(
+                      child: SceneView(
+                        brain.scene,
+                        camera: brain.space!.camera,
+                        onTick: (_, dt) => brain.tick(dt),
+                      ),
                     ),
                   ),
                 ),

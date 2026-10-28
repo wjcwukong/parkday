@@ -101,6 +101,7 @@ class LumiBrain extends ChangeNotifier {
   double _petIdle = 0;
   double _dizzyT = 0, _eatT = 0, _trickT = 0, _surpriseT = 0, _emoteT = 0;
   double _cheerT = 0;
+  double _starryT = 0;
   Face _emote = Face.wink;
   double _noteTimer = 4;
   double _scrollIdle = 99, _scrollActive = 0;
@@ -121,7 +122,18 @@ class LumiBrain extends ChangeNotifier {
 
   Future<void> init() async {
     await Scene.initializeStaticResources();
-    scene.toneMapping = ToneMappingMode.linear;
+    // Lumi is light: an HDR look with bloom, rendered over an opaque black
+    // backdrop and screen-blended onto the UI (see LightLayer), so the glow
+    // spills past Lumi's silhouette instead of being cut off by alpha.
+    scene.environmentSettings = EnvironmentSettings(
+      toneMapping: ToneMappingMode.pbrNeutral,
+      exposure: 1.0,
+      bloomEnabled: true,
+      bloomThreshold: 0.9,
+      bloomIntensity: 0.3,
+      bloomScatter: 0.62,
+    );
+    scene.add(_backdrop());
     final r = await LumiRig.create();
     scene.add(r.root);
     final s = Sparks(
@@ -133,6 +145,18 @@ class LumiBrain extends ChangeNotifier {
     sparks = s;
     rig = r;
     notifyListeners();
+  }
+
+  /// A black card far behind Lumi that keeps the scene opaque, so bloom
+  /// survives the resolve (it is multiplied by coverage) and screen blending
+  /// makes the black disappear.
+  static Node _backdrop() {
+    final mat = UnlitMaterial()
+      ..baseColorFactor = vm.Vector4(0, 0, 0, 1)
+      ..doubleSided = true;
+    return Node(name: 'backdrop', mesh: Mesh(PlaneGeometry(width: 400, depth: 400), mat))
+      ..rotation = vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), -math.pi / 2)
+      ..position = vm.Vector3(0, 0, 30);
   }
 
   /// A fresh rig dressed like the home Lumi, for other screens.
@@ -174,6 +198,17 @@ class LumiBrain extends ChangeNotifier {
     _lastPetMs = ts.inMilliseconds;
     _downMs = ts.inMilliseconds;
     _roughness = 0;
+    _press(p, 0.6);
+  }
+
+  /// Dents the jelly under the finger when it is on the head.
+  void _press(Offset p, double depth) {
+    final r = headRadiusPx;
+    if (r < 2) return;
+    final d = (p - _pos) / r;
+    final dd = d.distanceSquared;
+    if (dd > 1.2) return;
+    rig?.pokeHead(vm.Vector3(d.dx, -d.dy, -math.sqrt(math.max(0.05, 1 - dd))), depth: depth);
   }
 
   int _downMs = 0;
@@ -189,10 +224,12 @@ class LumiBrain extends ChangeNotifier {
     _lastPet = p;
     _lastPetMs = now;
     if (speed > 900 || d > 60) {
+      rig?.wobble(0.9);
       _roughness += d / 220;
       if (_roughness > 1.0 && _dizzyT <= 0) _getDizzy();
     } else if (d > 0.5) {
       _petIdle = 0;
+      _press(p, 0.35);
       if (asleep) return true;
       if (_petCharge > 0.4 && _rnd.nextDouble() < 0.18) {
         hearts.add(_Heart(p + Offset(_rnd.nextDouble() * 20 - 10, -10)));
@@ -204,6 +241,7 @@ class LumiBrain extends ChangeNotifier {
   void pointerUp(Offset p, Duration ts) {
     if (!_petting) return;
     _petting = false;
+    rig?.releasePoke();
     final held = ts.inMilliseconds - _downMs;
     if (_petCharge < 0.15 && held < 400 && _roughness < 0.2) poke();
   }
@@ -319,13 +357,14 @@ class LumiBrain extends ChangeNotifier {
   }
 
   void emote() {
-    const cycle = [Face.wink, Face.happy, Face.surprised, Face.talk];
+    const cycle = [Face.wink, Face.happy, Face.starry, Face.surprised, Face.talk];
     _emote = cycle[(cycle.indexOf(_emote) + 1) % cycle.length];
     _emoteT = 2.2;
     if (asleep) _wake();
     _setStatus(switch (_emote) {
       Face.wink => 'Lumi winks at you',
       Face.happy => 'Lumi is beaming',
+      Face.starry => 'Lumi is starstruck',
       Face.surprised => 'Ooh!',
       _ => 'Lumi hums a tune',
     }, 2.5);
@@ -384,6 +423,7 @@ class LumiBrain extends ChangeNotifier {
     _cheerT = 1.4;
     _trickT = 0.8;
     bursts.add(Burst(_pos, const Color(0xFFFFC34D), rings: 2, count: 40));
+    _starryT = 2.2;
     _setStatus('Key found! $keys of 5 collected', 4);
     notifyListeners();
   }
@@ -474,6 +514,7 @@ class LumiBrain extends ChangeNotifier {
     _surpriseT -= dt;
     _emoteT -= dt;
     _cheerT -= dt;
+    _starryT -= dt;
     _scrollIdle += dt;
 
     _petIdle += dt;
@@ -607,6 +648,7 @@ class LumiBrain extends ChangeNotifier {
       hands = 1;
     }
     if (_cheerT > 0) hands = 1;
+    if (_starryT > 0) face = Face.starry;
     if (_eatT > 0) {
       face = Face.munch;
       blush = 0.5;

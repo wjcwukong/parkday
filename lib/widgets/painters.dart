@@ -3,8 +3,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../lumi/lumi_brain.dart';
-import '../scene/lumi_rig.dart';
-import '../scene/space.dart';
 
 /// Deep-night background with twinkling stars.
 class StarfieldPainter extends CustomPainter {
@@ -57,50 +55,9 @@ class LumiAuraPainter extends CustomPainter {
     final rig = brain.rig;
     final space = brain.space;
     if (rig == null || space == null) return;
-    if (!front) {
-      _aura(canvas, rig, space);
-    } else {
-      _particles(canvas);
-    }
-  }
-
-  void _aura(Canvas canvas, LumiRig rig, ScreenSpace space) {
-    final c = brain.lumiPos;
-    final r = brain.headRadiusPx;
-    if (r < 2) return;
-    final s = rig.style;
-    final tint = displayColor(s.tint);
-    final glow = brain.asleep ? 0.55 : 1.0;
-    canvas.drawCircle(
-      c,
-      r * 2.6,
-      Paint()
-        ..shader = RadialGradient(
-          colors: [
-            tint.withValues(alpha: 0.30 * glow),
-            tint.withValues(alpha: 0.10 * glow),
-            tint.withValues(alpha: 0),
-          ],
-          stops: const [0.25, 0.55, 1],
-        ).createShader(Rect.fromCircle(center: c, radius: r * 2.6)),
-    );
-    // orbs: hands and foot
-    final orb = rig.orbMat.baseColorFactor;
-    final oc = displayColor(orb.xyz, normalize: true);
-    for (final n in [rig.handL, rig.handR, rig.foot]) {
-      final w = n.globalTransform.getTranslation();
-      final p = space.toScreen(w);
-      final rr = 30.0 * brain.lumiScale;
-      canvas.drawCircle(
-        p,
-        rr,
-        Paint()
-          ..shader = RadialGradient(
-            colors: [oc.withValues(alpha: 0.55), oc.withValues(alpha: 0.12), oc.withValues(alpha: 0)],
-            stops: const [0.0, 0.45, 1],
-          ).createShader(Rect.fromCircle(center: p, radius: rr)),
-      );
-    }
+    // The glow around Lumi comes from the scene's bloom now; only the
+    // front particles are painted here.
+    if (front) _particles(canvas);
   }
 
   void _particles(Canvas canvas) {
