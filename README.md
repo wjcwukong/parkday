@@ -23,10 +23,12 @@ The header stars Lumi, a little 3D lantern spirit rendered live with [Flutter Sc
   Every spark, trail and smoke puff is one mesh moved on the GPU by `assets/materials/sparks.fmat`
   (motion is a function of time, so scrubbing is free). The lagoon mirrors the scene with a planar
   reflector and `lagoon.fmat`, with bloom, purple haze and depth of field on the close shots.
-- **Lumi's room**: an orbitable floating island room at night, lit by a paper lantern, fairy lights and
-  fireflies that bloom. Tap a hat to wear it, or tap the cushion for a nap.
-- **Park map**: a 3D island at dusk with live waits, soft shadows, ambient occlusion, glowing lamps and
-  a tilt-shift blur. Each ride's wait tag is the real Flutter widget on a card in
+- **Lumi's room**: an orbitable floating island room at night with plank floors and timber-framed walls,
+  lit by a paper lantern, fairy lights, fireflies that bloom and a little flying-saucer lamp drifting
+  overhead. Tap a hat to wear it, or tap the cushion for a nap.
+- **Park map**: a 3D island at dusk laid out round a fountain plaza, with wide cobbled lanes out to each
+  ride and the gate, live waits, soft shadows, ambient occlusion, glowing lamps and a tilt-shift blur.
+  The camera opens on the whole island and moves in to follow Lumi once it sets off. Each ride's wait tag is the real Flutter widget on a card in
   the scene (Flutter Scene's `WidgetComponent`), so it sits in perspective and hides behind the rides.
   Tap a tag and Lumi hops over.
 - **Games**: Star Catch (45 seconds of falling stars) and Sky Lift (float as high as you can, up to the moon).

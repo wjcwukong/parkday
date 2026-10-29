@@ -50,6 +50,8 @@ class _LumiRoomState extends State<LumiRoom> {
   final hatNodes = <Hat, Node>{};
   final cushion = vm.Vector3(0.95, 0.35, -0.55);
   Node? fireflies;
+  Node? ufo;
+  static final _ufoHome = vm.Vector3(0.7, 4.2, 2.0);
   bool napping = false;
   vm.Vector3 lumiTarget = vm.Vector3(-0.15, 1.55, 0.1);
   vm.Vector3 lumiPos = vm.Vector3(-0.15, 1.55, 0.1);
@@ -112,7 +114,7 @@ class _LumiRoomState extends State<LumiRoom> {
     scene.add(
       _mesh(
         CylinderGeometry(bottomRadius: 2.25, topRadius: 2.3, height: 0.32, radialSegments: 48),
-        wood,
+        woodDark,
         at: vm.Vector3(0, 0.0, 0),
       ),
     );
@@ -123,17 +125,29 @@ class _LumiRoomState extends State<LumiRoom> {
         at: vm.Vector3(0, -0.8, 0),
       ),
     );
-    for (var i = 0; i < 18; i++) {
-      final a = i / 18 * math.pi * 2;
-      scene.add(
-        _mesh(
-          CuboidGeometry(vm.Vector3(0.05, 0.02, 0.8)),
-          woodDark,
-          at: vm.Vector3(math.cos(a) * 1.4, 0.17, math.sin(a) * 1.4),
-          rot: vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), -a),
-        ),
-      );
+    // Floorboards: planks running front to back with dark seams between
+    // them, each a slightly different shade, trimmed to the round deck,
+    // plus a rim.
+    final planks = InstancedMesh(geometry: CuboidGeometry(vm.Vector3.all(1)), material: wood);
+    final shade = math.Random(3);
+    for (var x = -2.1; x < 2.15; x += 0.28) {
+      final edge = math.max((x - 0.13).abs(), (x + 0.13).abs());
+      if (edge >= 2.2) continue;
+      final half = math.sqrt(2.2 * 2.2 - edge * edge);
+      // Break long rows into two boards at a staggered joint.
+      final joint = -half * 0.4 + shade.nextDouble() * half * 0.8;
+      for (final (a, b) in [(-half, joint - 0.01), (joint + 0.01, half)]) {
+        final v = 0.8 + shade.nextDouble() * 0.4;
+        planks.addInstance(
+          vm.Matrix4.translation(vm.Vector3(x, 0.155, (a + b) / 2))..scaleByVector3(vm.Vector3(0.26, 0.03, b - a)),
+          color: vm.Vector4(v, v * (0.95 + shade.nextDouble() * 0.1), v, 1),
+        );
+      }
     }
+    scene.add(Node()..addComponent(InstancedMeshComponent(planks)));
+    scene.add(
+      _mesh(TorusGeometry(radius: 2.27, tubeRadius: 0.05, radialSegments: 64), woodDark, at: vm.Vector3(0, 0.16, 0)),
+    );
     // ladder dangling below
     for (final x in [-0.22, 0.22]) {
       scene.add(
@@ -153,6 +167,28 @@ class _LumiRoomState extends State<LumiRoom> {
     // two walls forming the back corner
     scene.add(_mesh(CuboidGeometry(vm.Vector3(3.9, 2.7, 0.14)), wall, at: vm.Vector3(0.05, 1.5, 1.55)));
     scene.add(_mesh(CuboidGeometry(vm.Vector3(0.14, 2.7, 2.6)), wall, at: vm.Vector3(-1.62, 1.5, 0.25)));
+    // timber frame: corner posts, a beam along the top and a skirting board
+    for (final (x, z) in [(2.0, 1.55), (-1.62, 1.55), (-1.62, -1.05)]) {
+      scene.add(_mesh(CuboidGeometry(vm.Vector3(0.17, 2.95, 0.17)), woodDark, at: vm.Vector3(x, 1.48, z)));
+    }
+    scene.add(_mesh(CuboidGeometry(vm.Vector3(3.8, 0.15, 0.22)), woodDark, at: vm.Vector3(0.19, 2.88, 1.52)));
+    scene.add(_mesh(CuboidGeometry(vm.Vector3(0.22, 0.15, 2.6)), woodDark, at: vm.Vector3(-1.59, 2.88, 0.25)));
+    scene.add(_mesh(CuboidGeometry(vm.Vector3(3.6, 0.14, 0.04)), woodDark, at: vm.Vector3(0.19, 0.24, 1.47)));
+    scene.add(_mesh(CuboidGeometry(vm.Vector3(0.04, 0.14, 2.5)), woodDark, at: vm.Vector3(-1.54, 0.24, 0.25)));
+    // vertical board seams on both walls
+    final seams = InstancedMesh(geometry: CuboidGeometry(vm.Vector3.all(1)), material: woodDark);
+    for (var x = -1.25; x < 1.9; x += 0.36) {
+      if ((x - 0.55).abs() < 0.7) continue; // the round window
+      seams.addInstance(
+        vm.Matrix4.translation(vm.Vector3(x, 1.5, 1.475))..scaleByVector3(vm.Vector3(0.025, 2.6, 0.01)),
+      );
+    }
+    for (var z = -0.75; z < 1.4; z += 0.36) {
+      seams.addInstance(
+        vm.Matrix4.translation(vm.Vector3(-1.545, 1.5, z))..scaleByVector3(vm.Vector3(0.01, 2.6, 0.025)),
+      );
+    }
+    scene.add(Node()..addComponent(InstancedMeshComponent(seams)));
     // round window with the moon
     scene.add(
       _mesh(
@@ -195,12 +231,12 @@ class _LumiRoomState extends State<LumiRoom> {
     scene.add(Node()..addComponent(InstancedMeshComponent(bulbs)));
 
     // floor rug
-    scene.add(_mesh(DiscGeometry(radius: 1.0, segments: 48), rugA..depthLayer = 1, at: vm.Vector3(-0.1, 0.161, 0.1)));
+    scene.add(_mesh(DiscGeometry(radius: 1.0, segments: 48), rugA..depthLayer = 1, at: vm.Vector3(-0.1, 0.172, 0.1)));
     scene.add(
       _mesh(
         RingGeometry(innerRadius: 0.5, outerRadius: 0.72, segments: 48),
         rugB..depthLayer = 2,
-        at: vm.Vector3(-0.1, 0.161, 0.1),
+        at: vm.Vector3(-0.1, 0.172, 0.1),
       ),
     );
 
@@ -295,12 +331,26 @@ class _LumiRoomState extends State<LumiRoom> {
     }
     fireflies!.addComponent(InstancedMeshComponent(flies));
     scene.add(fireflies!);
-    final hanging = Node()..position = vm.Vector3(1.3, 3.6, 1.9);
-    hanging.add(
-      _mesh(CylinderGeometry(bottomRadius: 0.012, topRadius: 0.012, height: 0.9), woodDark, at: vm.Vector3(0, 0.45, 0)),
+    // The little flying-saucer lamp floating over the room: a dark hull
+    // with a glass dome and a ring of warm bulbs underneath.
+    final hull = _pbr(0.1, 0.09, 0.14, rough: 0.4);
+    ufo = Node()..position = _ufoHome;
+    ufo!.add(_mesh(SphereGeometry(radius: 0.42), hull, scale: vm.Vector3(1, 0.26, 1)));
+    ufo!.add(
+      _mesh(TorusGeometry(radius: 0.4, tubeRadius: 0.035, radialSegments: 40), _pbr(0.3, 0.26, 0.32, rough: 0.3)),
     );
-    hanging.add(_mesh(SphereGeometry(radius: 0.16), _pbr(1.0, 0.75, 0.45, emissive: 5)));
-    scene.add(hanging);
+    ufo!.add(_mesh(SphereGeometry(radius: 0.17), _pbr(0.35, 0.4, 0.6, rough: 0.2), at: vm.Vector3(0, 0.07, 0)));
+    for (var i = 0; i < 6; i++) {
+      final a = i / 6 * math.pi * 2;
+      ufo!.add(
+        _mesh(
+          SphereGeometry(radius: 0.055),
+          unlit(6, 4.2, 1.8),
+          at: vm.Vector3(math.cos(a) * 0.27, -0.08, math.sin(a) * 0.27),
+        ),
+      );
+    }
+    scene.add(ufo!);
 
     // hat shelf on the left wall
     scene.add(_mesh(CuboidGeometry(vm.Vector3(0.3, 0.06, 2.1)), wood, at: vm.Vector3(-1.4, 1.28, 0.3)));
@@ -380,6 +430,11 @@ class _LumiRoomState extends State<LumiRoom> {
     t += dt;
     fireflies?.rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), t * 0.08);
     fireflies?.position = vm.Vector3(0, math.sin(t * 0.7) * 0.08, 0);
+    ufo
+      ?..position = _ufoHome + vm.Vector3(0, math.sin(t * 1.1) * 0.07, 0)
+      ..rotation =
+          vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), t * 0.4) *
+          vm.Quaternion.axisAngle(vm.Vector3(0, 0, 1), math.sin(t * 0.8) * 0.06);
     if (!_dragging) {
       azimuth += _azVel * dt;
       _azVel *= math.exp(-dt * 3);

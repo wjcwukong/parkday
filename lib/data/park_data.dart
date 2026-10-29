@@ -10,12 +10,12 @@ class Ride {
 }
 
 const rides = [
-  Ride('Sky Coaster', 15, 'RIDE', x: -2.6, z: 1.6),
-  Ride('River Run', 15, 'RIDE', x: -2.2, z: -1.6),
-  Ride('Star Swing', 5, 'RIDE', x: -0.4, z: -0.6),
-  Ride('Moon Drop', 35, 'RIDE', x: 2.4, z: -2.2),
-  Ride('Tidal Twist', 5, 'RIDE', x: 1.8, z: 2.6),
-  Ride('Comet Carousel', 10, 'RIDE', x: 1.2, z: 0.4),
+  Ride('Sky Coaster', 15, 'RIDE', x: -3.4, z: 2.6),
+  Ride('River Run', 15, 'RIDE', x: 3.3, z: 2.4),
+  Ride('Star Swing', 5, 'RIDE', x: -3.0, z: -0.5),
+  Ride('Moon Drop', 35, 'RIDE', x: 3.4, z: -0.7),
+  Ride('Tidal Twist', 5, 'RIDE', x: 0.4, z: 4.4),
+  Ride('Comet Carousel', 10, 'RIDE', x: 0.1, z: 2.5),
 ];
 
 class Place {

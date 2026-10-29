@@ -17,7 +17,35 @@ PhysicallyBasedMaterial _pbr(double r, double g, double b, {double rough = 0.85}
   ..metallicFactor = 0
   ..roughnessFactor = rough;
 
-final _plaza = vm.Vector3(0.6, 0, -1.9);
+// The fountain plaza is the hub every path leads from; Lumi waits just
+// inside the entrance gate, at the south edge nearest the camera.
+final _fountain = vm.Vector3.zero();
+final _gate = vm.Vector3(0, 0, -3.7);
+final _start = vm.Vector3(0, 0, -3.0);
+
+/// A flat strip [width] wide following [pts] on the ground, for the grout
+/// under a cobbled path.
+MeshGeometry _ribbon(List<vm.Vector3> pts, double width) {
+  final pos = <double>[], nor = <double>[];
+  final idx = <int>[];
+  for (var i = 0; i < pts.length; i++) {
+    final a = pts[math.max(0, i - 1)], b = pts[math.min(pts.length - 1, i + 1)];
+    final side = (b - a).cross(vm.Vector3(0, 1, 0)).normalized() * (width / 2);
+    for (final q in [pts[i] - side, pts[i] + side]) {
+      pos.addAll([q.x, q.y, q.z]);
+      nor.addAll([0, 1, 0]);
+    }
+    if (i > 0) {
+      final k = i * 2;
+      idx.addAll([k - 2, k, k - 1, k - 1, k, k + 1]);
+    }
+  }
+  return MeshGeometry.fromArrays(
+    positions: Float32List.fromList(pos),
+    normals: Float32List.fromList(nor),
+    indices: idx,
+  );
+}
 
 Node _m(Geometry g, fs.Material mat, {vm.Vector3? at, vm.Quaternion? rot, vm.Vector3? scale}) {
   final n = Node(mesh: Mesh(g, mat));
@@ -76,8 +104,15 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
   LumiRig? rig;
   Size size = Size.zero;
   double t = 0;
-  double azimuth = 0.35, elevation = 0.92, distance = 14.5;
-  vm.Vector3 target = vm.Vector3(-0.2, 0, 0.2);
+  // The camera opens on the whole island, then dollies in and follows
+  // Lumi when it hops off, like the original. Any pan or pinch hands it
+  // to the user.
+  double azimuth = 0.1, elevation = 0.95, distance = 21.5;
+  vm.Vector3 target = vm.Vector3(0, 0, 1.1);
+  static const _azGoal = 0.1;
+  double _elGoal = 0.95, _distGoal = 21.5;
+  vm.Vector3 _targetGoal = vm.Vector3(0, 0, 1.1);
+  bool _userCam = false;
   late PerspectiveCamera camera = _cam();
 
   // animated rides
@@ -90,8 +125,8 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
   Node? dropRing;
 
   // Lumi hopping
-  vm.Vector3 lumiFrom = _plaza.clone();
-  vm.Vector3 lumiTo = _plaza.clone();
+  vm.Vector3 lumiFrom = _start.clone();
+  vm.Vector3 lumiTo = _start.clone();
   double hopT = 1, hopLen = 0;
   Ride? heading;
   bool arrived = false;
@@ -110,7 +145,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
           math.sin(elevation) * distance,
           -math.cos(azimuth) * math.cos(elevation) * distance,
         );
-    return PerspectiveCamera(fovRadiansY: 48 * vm.degrees2Radians, position: eye, target: target, fovFar: 120);
+    return PerspectiveCamera(fovRadiansY: 40 * vm.degrees2Radians, position: eye, target: target, fovFar: 120);
   }
 
   Future<void> _build() async {
@@ -186,70 +221,154 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
         at: vm.Vector3(0, 0.0, 0),
       ),
     );
-    final hill = _pbr(0.13, 0.48, 0.25);
     final rnd = math.Random(4);
-    for (var i = 0; i < 7; i++) {
-      final a = rnd.nextDouble() * math.pi * 2, r = 3.6 + rnd.nextDouble() * 2;
-      scene.add(
-        _m(
-          SphereGeometry(radius: 1, segments: 24, rings: 12),
-          hill,
-          at: vm.Vector3(math.cos(a) * r, -0.35, math.sin(a) * r),
-          scale: vm.Vector3(1, 0.45, 1) * (0.8 + rnd.nextDouble()),
-        ),
+    // Cobbled paths: a ring round the fountain and a lane from it to every
+    // ride and to the gate, each a dark grout strip set with stones.
+    final cobbles = InstancedMesh(
+      geometry: CuboidGeometry(vm.Vector3(1, 1, 1)),
+      material: _pbr(0.5, 0.4, 0.35, rough: 0.9),
+    );
+    final grout = _pbr(0.1, 0.075, 0.07);
+    final fountain = _fountain;
+    final pathPts = <vm.Vector3>[];
+    void stone(vm.Vector3 p, double yaw, double w) {
+      final shade = 0.78 + rnd.nextDouble() * 0.4;
+      cobbles.addInstance(
+        vm.Matrix4.translation(p + vm.Vector3(0, 0.07, 0))
+          ..rotateY(yaw + (rnd.nextDouble() - 0.5) * 0.25)
+          ..scaleByVector3(vm.Vector3(w, 0.035, 0.085 + rnd.nextDouble() * 0.02)),
+        color: vm.Vector4(shade, shade * (0.96 + rnd.nextDouble() * 0.06), shade, 1),
       );
     }
 
-    // stepping-stone paths from the plaza to each ride
-    final stones = InstancedMesh(
-      geometry: CylinderGeometry(bottomRadius: 1, topRadius: 1, height: 1, radialSegments: 12),
-      material: _pbr(0.45, 0.35, 0.3),
-    );
-    final plaza = _plaza;
-    final pathPts = <vm.Vector3>[];
-    for (final ride in rides) {
-      final end = vm.Vector3(ride.x, 0, ride.z);
-      final mid = (plaza + end) * 0.5 + vm.Vector3(rnd.nextDouble() - 0.5, 0, rnd.nextDouble() - 0.5) * 1.2;
-      final len = (end - plaza).length;
-      final n = (len / 0.28).round();
+    void lane(vm.Vector3 from, vm.Vector3 to, {double width = 0.56}) {
+      final dir = (to - from).normalized();
+      final bend = dir.cross(vm.Vector3(0, 1, 0)) * ((rnd.nextDouble() - 0.5) * 0.9);
+      final mid = (from + to) * 0.5 + bend;
+      final len = (to - from).length;
+      final n = (len / 0.11).round();
+      final pts = <vm.Vector3>[];
       for (var i = 0; i <= n; i++) {
         final f = i / n;
-        final p = plaza * ((1 - f) * (1 - f)) + mid * (2 * f * (1 - f)) + end * (f * f);
-        pathPts.add(p);
-        stones.addInstance(
-          vm.Matrix4.translation(p + vm.Vector3(0, 0.06, 0))
-            ..scaleByVector3(vm.Vector3(0.13 + rnd.nextDouble() * 0.04, 0.03, 0.13)),
-        );
+        pts.add(from * ((1 - f) * (1 - f)) + mid * (2 * f * (1 - f)) + to * (f * f));
+      }
+      scene.add(_m(_ribbon(pts.map((q) => q + vm.Vector3(0, 0.055, 0)).toList(), width + 0.05), grout));
+      for (var i = 0; i < pts.length; i++) {
+        final tdir = pts[math.min(pts.length - 1, i + 1)] - pts[math.max(0, i - 1)];
+        final yaw = math.atan2(tdir.x, tdir.z);
+        final side = tdir.cross(vm.Vector3(0, 1, 0)).normalized();
+        final across = (width / 0.11).floor();
+        final off = i.isEven ? 0.0 : 0.055;
+        for (var k = 0; k < across; k++) {
+          final o = -width / 2 + 0.055 + k * 0.11 + off;
+          if (o > width / 2 - 0.04) continue;
+          stone(pts[i] + side * o, yaw + math.pi / 2, 0.09);
+        }
+        pathPts.add(pts[i]);
       }
     }
-    scene.add(Node()..addComponent(InstancedMeshComponent(stones)));
-    scene.add(
-      _m(
-        CylinderGeometry(bottomRadius: 0.7, topRadius: 0.7, height: 0.05, radialSegments: 32),
-        _pbr(0.5, 0.42, 0.44),
-        at: plaza + vm.Vector3(0, 0.06, 0),
-      ),
-    );
 
-    // A fountain on the plaza.
+    // the plaza ring
+    scene.add(
+      _m(RingGeometry(innerRadius: 0.5, outerRadius: 1.3, segments: 48), grout, at: fountain + vm.Vector3(0, 0.055, 0)),
+    );
+    for (var r = 0.58; r < 1.27; r += 0.11) {
+      final n = (2 * math.pi * r / 0.11).floor();
+      final phase = rnd.nextDouble();
+      for (var i = 0; i < n; i++) {
+        final a = (i + phase) / n * math.pi * 2;
+        final p = fountain + vm.Vector3(math.cos(a) * r, 0, math.sin(a) * r);
+        stone(p, -a, 0.09);
+        pathPts.add(p);
+      }
+    }
+    for (final ride in rides) {
+      final end = vm.Vector3(ride.x, 0, ride.z);
+      final dir = (end - fountain).normalized();
+      lane(fountain + dir * 1.25, end - dir * 0.95);
+    }
+    lane(fountain + vm.Vector3(0, 0, -1.25), _gate + vm.Vector3(0, 0, 0.1), width: 0.66);
+    scene.add(Node()..addComponent(InstancedMeshComponent(cobbles)));
+
+    // A tiered fountain in the middle of the plaza.
+    final marble = _pbr(0.78, 0.74, 0.8, rough: 0.5);
+    final water = PhysicallyBasedMaterial()
+      ..baseColorFactor = vm.Vector4(0.1, 0.4, 0.85, 1)
+      ..roughnessFactor = 0.1
+      ..metallicFactor = 0
+      ..emissiveFactor = vm.Vector4(0.03, 0.15, 0.4, 1);
     scene.add(
       _m(
-        CylinderGeometry(bottomRadius: 0.46, topRadius: 0.42, height: 0.12, radialSegments: 32),
-        _pbr(0.72, 0.68, 0.74),
-        at: plaza + vm.Vector3(0, 0.12, 0),
+        CylinderGeometry(bottomRadius: 0.5, topRadius: 0.46, height: 0.14, radialSegments: 32),
+        marble,
+        at: fountain + vm.Vector3(0, 0.12, 0),
       ),
     );
     scene.add(
       _m(
-        CylinderGeometry(bottomRadius: 0.36, topRadius: 0.36, height: 0.02, radialSegments: 32),
-        PhysicallyBasedMaterial()
-          ..baseColorFactor = vm.Vector4(0.1, 0.4, 0.85, 1)
-          ..roughnessFactor = 0.1
-          ..metallicFactor = 0
-          ..emissiveFactor = vm.Vector4(0.02, 0.12, 0.3, 1),
-        at: plaza + vm.Vector3(0, 0.18, 0),
+        CylinderGeometry(bottomRadius: 0.4, topRadius: 0.4, height: 0.02, radialSegments: 32),
+        water,
+        at: fountain + vm.Vector3(0, 0.19, 0),
       ),
     );
+    scene.add(
+      _m(
+        CylinderGeometry(bottomRadius: 0.06, topRadius: 0.05, height: 0.3, radialSegments: 12),
+        marble,
+        at: fountain + vm.Vector3(0, 0.33, 0),
+      ),
+    );
+    scene.add(
+      _m(
+        CylinderGeometry(bottomRadius: 0.08, topRadius: 0.18, height: 0.06, radialSegments: 24),
+        marble,
+        at: fountain + vm.Vector3(0, 0.5, 0),
+      ),
+    );
+    scene.add(_m(SphereGeometry(radius: 0.07, segments: 12, rings: 8), water, at: fountain + vm.Vector3(0, 0.56, 0)));
+
+    // The entrance gate: two round towers with candy domes and a red arch.
+    final towerWall = _pbr(0.9, 0.84, 0.86, rough: 0.6);
+    final dome = _pbr(0.9, 0.22, 0.32, rough: 0.5);
+    for (final x in [-0.62, 0.62]) {
+      final at = _gate + vm.Vector3(x, 0, 0);
+      scene.add(
+        _m(
+          CylinderGeometry(bottomRadius: 0.3, topRadius: 0.28, height: 0.8, radialSegments: 24),
+          towerWall,
+          at: at + vm.Vector3(0, 0.4, 0),
+        ),
+      );
+      scene.add(
+        _m(
+          SphereGeometry(radius: 1, segments: 20, rings: 12),
+          dome,
+          at: at + vm.Vector3(0, 0.82, 0),
+          scale: vm.Vector3(0.34, 0.3, 0.34),
+        ),
+      );
+      scene.add(
+        _m(TorusGeometry(radius: 0.3, tubeRadius: 0.03, radialSegments: 24), dome, at: at + vm.Vector3(0, 0.62, 0)),
+      );
+    }
+    scene.add(_m(CuboidGeometry(vm.Vector3(1.0, 0.08, 0.1)), _pbr(0.8, 0.14, 0.2), at: _gate + vm.Vector3(0, 0.7, 0)));
+    // a picket fence along the south shore either side of the gate
+    final pickets = InstancedMesh(geometry: CuboidGeometry(vm.Vector3(1, 1, 1)), material: _pbr(0.92, 0.9, 0.88));
+    for (var i = 0; i < 26; i++) {
+      final a = -math.pi / 2 + (i < 13 ? -1 : 1) * (0.2 + (i % 13) * 0.045);
+      final p = vm.Vector3(math.cos(a) * 5.75, 0, math.sin(a) * 5.75);
+      pickets.addInstance(
+        vm.Matrix4.translation(p + vm.Vector3(0, 0.12, 0))
+          ..rotateY(-a)
+          ..scaleByVector3(vm.Vector3(0.03, 0.24, 0.03)),
+      );
+      pickets.addInstance(
+        vm.Matrix4.translation(p + vm.Vector3(0, 0.18, 0))
+          ..rotateY(-a + math.pi / 2)
+          ..scaleByVector3(vm.Vector3(0.012, 0.025, 0.27)),
+      );
+    }
+    scene.add(Node()..addComponent(InstancedMeshComponent(pickets)));
 
     // Trees, bushes and rocks, instanced by material. Canopies are one or
     // two soft blobs in a few greens, with the odd blossom tree.
@@ -266,7 +385,8 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
     final rocks = inst(IcosphereGeometry(radius: 1, subdivisions: 1), _pbr(0.4, 0.33, 0.4));
     bool clear(vm.Vector3 p, double r) =>
         !rides.any((rd) => (vm.Vector3(rd.x, 0, rd.z) - p).length < 1.0 + r) &&
-        (p - plaza).length > 0.9 + r &&
+        (p - fountain).length > 1.4 + r &&
+        (p - _gate).length > 1.1 + r &&
         !pathPts.any((q) => (q - p).length < 0.22 + r);
     for (var i = 0; i < 110; i++) {
       final a = rnd.nextDouble() * math.pi * 2, r = 1.0 + math.sqrt(rnd.nextDouble()) * 4.9;
@@ -319,10 +439,10 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
       ..baseColorFactor = vm.Vector4(1, 0.85, 0.5, 1)
       ..emissiveFactor = vm.Vector4(5, 3.4, 1.4, 1);
     final lamps = <vm.Vector3>[];
-    for (final ride in rides) {
-      final end = vm.Vector3(ride.x, 0, ride.z);
-      final side = (end - plaza).normalized().cross(vm.Vector3(0, 1, 0));
-      lamps.add(plaza + (end - plaza) * 0.5 + side * 0.32);
+    for (final ride in [...rides.map((r) => vm.Vector3(r.x, 0, r.z)), _gate]) {
+      final dir = (ride - fountain).normalized();
+      final side = dir.cross(vm.Vector3(0, 1, 0));
+      lamps.add(fountain + dir * 1.45 + side * 0.4);
     }
     for (var i = 0; i < 12; i++) {
       final a = i / 12 * math.pi * 2 + 0.2;
@@ -335,7 +455,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
       scene.add(_m(SphereGeometry(radius: 0.06, segments: 10, rings: 6), lampGlow, at: p + vm.Vector3(0, 0.53, 0)));
     }
     // A few warm pools of light on the grass.
-    for (final p in [plaza, lamps[0], lamps[2], lamps[4]]) {
+    for (final p in [fountain, _gate, lamps[0], lamps[3]]) {
       scene.add(
         Node()
           ..position = p + vm.Vector3(0, 0.7, 0)
@@ -350,7 +470,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
           CylinderGeometry(bottomRadius: 1, topRadius: 1, height: 1, radialSegments: 16),
           pad,
           at: vm.Vector3(math.cos(a) * r, -0.34, math.sin(a) * r),
-          scale: vm.Vector3(0.22 + rnd.nextDouble() * 0.15, 0.02, 0.22 + rnd.nextDouble() * 0.15),
+          scale: vm.Vector3(0.12 + rnd.nextDouble() * 0.1, 0.02, 0.12 + rnd.nextDouble() * 0.1),
         ),
       );
     }
@@ -599,6 +719,9 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
     final r = rig;
     if (r == null) return;
     selected.value = ride;
+    _userCam = false;
+    _distGoal = 16.5;
+    _elGoal = 0.9;
     setState(() {
       lumiFrom = _lumiGround();
       lumiTo = vm.Vector3(ride.x, 0, ride.z) + vm.Vector3(math.sin(azimuth), 0, -math.cos(azimuth)) * 1.2;
@@ -616,8 +739,20 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
 
   void _tick(double dt) {
     t += dt;
+    if (!_userCam) {
+      // Ease towards the overview, or after Lumi once it sets off.
+      // Keep the plaza in frame by leaning the target back towards it.
+      if (heading != null) _targetGoal = _lumiGround() * 0.7 + vm.Vector3(0, 0, 0.9);
+      final k = 1 - math.exp(-dt * 1.4);
+      target += (_targetGoal - target) * k;
+      distance += (_distGoal - distance) * k;
+      elevation += (_elGoal - elevation) * k;
+      azimuth += (_azGoal - azimuth) * k;
+    }
     camera = _cam();
-    scene.depthOfField.focusDistance = distance;
+    scene.depthOfField
+      ..focusDistance = distance
+      ..blurScale = (distance / 2.2).clamp(4.0, 10.0);
     _faceTags();
     for (final (n, speed) in spinners) {
       n.rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), t * speed);
@@ -700,12 +835,13 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
                       if (ride != null) _go(ride);
                     },
                     onScaleStart: (d) {
+                      _userCam = true;
                       _scaleStart = distance;
                       _rotStart = azimuth;
                     },
                     onScaleUpdate: (d) {
                       if (d.pointerCount >= 2) {
-                        distance = (_scaleStart / d.scale).clamp(6.0, 22.0);
+                        distance = (_scaleStart / d.scale).clamp(8.0, 40.0);
                         azimuth = _rotStart - d.rotation;
                       } else {
                         // pan along the ground relative to the view
