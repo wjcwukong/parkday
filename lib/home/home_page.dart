@@ -45,17 +45,36 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     super.initState();
     brain.init();
     brain.addListener(_onBrain);
-    brain.cardRects = _cardRects;
+    brain.hopCards = _hopCards;
   }
 
-  /// The feed cards' rects on the page, for Lumi to hop between.
-  List<Rect?> _cardRects() {
+  /// How the feed opens up when the page tips back, like the original's
+  /// three layers: the header, the fireworks card, and the reward and
+  /// weather cards together, each a thick block standing off the page and
+  /// drawn apart down it so every block's front edge shows. The search box
+  /// stays down on the page and the rest of the feed fades away. Each entry
+  /// is the card's lift and its move down the page (logical pixels), its
+  /// delay in rising, and how much of it still shows.
+  static (double, double, double, double) _layer(int index) => switch (index) {
+    0 => (0, 0, 0, 0.45),
+    1 => (80, 75, 0.12, 1),
+    2 || 3 => (64, 140, 0.24, 1),
+    _ => (0, 0, 0, 0),
+  };
+
+  /// The raised cards' rects on the page and their lifts, for Lumi to hop
+  /// between.
+  List<(Rect, double, double)?> _hopCards() {
     final page = pageKey.currentContext?.findRenderObject() as RenderBox?;
+    final view = brain.scrollRect.deflate(8);
     return [
-      for (final k in slabKeys)
-        switch (k.currentContext?.findRenderObject()) {
-          final RenderBox b when page != null && b.attached && b.hasSize =>
-            b.localToGlobal(Offset.zero, ancestor: page) & b.size,
+      for (var i = 0; i < slabKeys.length; i++)
+        switch (slabKeys[i].currentContext?.findRenderObject()) {
+          final RenderBox b when page != null && b.attached && b.hasSize && _layer(i).$1 > 0 =>
+            switch (b.localToGlobal(Offset.zero, ancestor: page) & b.size) {
+              final r when r.top >= view.top && r.bottom <= view.bottom => (r, _layer(i).$1, _layer(i).$2),
+              _ => null,
+            },
           _ => null,
         },
     ];
@@ -166,14 +185,82 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   brain: brain,
                   child: Stack(
                     children: [
-                      Positioned.fill(child: CustomPaint(painter: StarfieldPainter(clock))),
+                      // The page's sky falls away into the dark as it tips
+                      // back, leaving the raised layers floating.
+                      Positioned.fill(
+                        child: ValueListenableBuilder<int>(
+                          valueListenable: brain.frame,
+                          child: CustomPaint(painter: StarfieldPainter(clock)),
+                          builder: (context, _, child) => Opacity(opacity: 1 - 0.92 * brain.tiltAmount, child: child),
+                        ),
+                      ),
+                      // ---------------- header ----------------
+                      // One block, the back layer when the page tips back, so
+                      // it goes under the feed. It carries its own copy of
+                      // the page's sky, cut to the header, so it looks the
+                      // same while flat.
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: headerH,
+                        child: _Slab(
+                          brain: brain,
+                          index: -1,
+                          lift: LumiBrain.headerLift,
+                          radius: 18,
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: ClipRect(
+                                  child: OverflowBox(
+                                    alignment: Alignment.topCenter,
+                                    minHeight: size.height,
+                                    maxHeight: size.height,
+                                    child: CustomPaint(painter: StarfieldPainter(clock), size: size),
+                                  ),
+                                ),
+                              ),
+                              Positioned.fill(
+                                child: IgnorePointer(child: CustomPaint(painter: WeatherPainter(clock, brain.weather))),
+                              ),
+                              Positioned(
+                                top: pad,
+                                left: 0,
+                                right: 0,
+                                height: barH,
+                                child: _TopBar(
+                                  brain: brain,
+                                  onWardrobe: () => setState(() => wardrobe = !wardrobe),
+                                  onSettings: () => _settings(context),
+                                ),
+                              ),
+                              Positioned(
+                                top: pad + barH + stageH,
+                                left: 0,
+                                right: 0,
+                                height: greetH,
+                                child: _Greeting(
+                                  brain: brain,
+                                  onMic: _mic,
+                                  onTrick: brain.trick,
+                                  onRoom: () => _push(LumiRoom(brain: brain)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                       // ---------------- feed ----------------
                       Positioned(
                         top: headerH,
                         left: 0,
                         right: 0,
                         bottom: 0,
+                        // Unclipped while the page is tipped back, so the
+                        // raised cards can stand up past the header's edge.
                         child: ClipRect(
+                          clipBehavior: brain.flying ? Clip.none : Clip.hardEdge,
                           child: NotificationListener<ScrollNotification>(
                             onNotification: (n) {
                               if (n is ScrollUpdateNotification && n.depth == 0) {
@@ -187,11 +274,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               controller: scroll,
                               child: ListView(
                                 controller: scroll,
+                                clipBehavior: brain.flying ? Clip.none : Clip.hardEdge,
                                 padding: const EdgeInsets.fromLTRB(14, 4, 14, 40),
                                 children: [
                                   _Slab(
                                     key: slabKeys[0],
                                     index: 0,
+                                    layer: _layer(0),
                                     brain: brain,
                                     radius: 12,
                                     child: SearchBox(controller: search, onChanged: (v) => setState(() => query = v)),
@@ -203,6 +292,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     _Slab(
                                       key: slabKeys[1],
                                       index: 1,
+                                      layer: _layer(1),
                                       brain: brain,
                                       child: FireworksCard(
                                         t: clock,
@@ -214,6 +304,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     _Slab(
                                       key: slabKeys[2],
                                       index: 2,
+                                      layer: _layer(2),
                                       brain: brain,
                                       child: RewardCard(brain: brain, onCollect: _collect),
                                     ),
@@ -221,6 +312,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     _Slab(
                                       key: slabKeys[3],
                                       index: 3,
+                                      layer: _layer(3),
                                       brain: brain,
                                       child: WeatherCard(brain: brain),
                                     ),
@@ -228,6 +320,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     _Slab(
                                       key: slabKeys[4],
                                       index: 4,
+                                      layer: _layer(4),
                                       brain: brain,
                                       child: PhotoBoothCard(onTap: _photo, friendName: friendName),
                                     ),
@@ -235,6 +328,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     _Slab(
                                       key: slabKeys[5],
                                       index: 5,
+                                      layer: _layer(5),
                                       brain: brain,
                                       child: PlayCard(
                                         t: clock,
@@ -258,6 +352,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     _Slab(
                                       key: slabKeys[6],
                                       index: 6,
+                                      layer: _layer(6),
                                       brain: brain,
                                       child: ParkMapCard(
                                         friendName: friendName,
@@ -268,11 +363,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     _Slab(
                                       key: slabKeys[7],
                                       index: 7,
+                                      layer: _layer(7),
                                       brain: brain,
                                       child: WaitTimesCard(key: waitKey, highlight: highlightRide),
                                     ),
                                     const SizedBox(height: 12),
-                                    _Slab(key: slabKeys[8], index: 8, brain: brain, child: const DiningCard()),
+                                    _Slab(
+                                      key: slabKeys[8],
+                                      index: 8,
+                                      layer: _layer(8),
+                                      brain: brain,
+                                      child: const DiningCard(),
+                                    ),
                                   ],
                                 ],
                               ),
@@ -289,40 +391,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         right: 0,
                         height: size.height - headerH + 8,
                         child: WardrobePanel(brain: brain, onClose: () => setState(() => wardrobe = false)),
-                      ),
-                      // ---------------- header ----------------
-                      Positioned(
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: headerH,
-                        child: IgnorePointer(child: CustomPaint(painter: WeatherPainter(clock, brain.weather))),
-                      ),
-                      Positioned(
-                        top: pad,
-                        left: 0,
-                        right: 0,
-                        height: barH,
-                        child: _TopBar(
-                          brain: brain,
-                          onWardrobe: () => setState(() => wardrobe = !wardrobe),
-                          onSettings: () => _settings(context),
-                        ),
-                      ),
-                      Positioned(
-                        top: pad + barH + stageH,
-                        left: 0,
-                        right: 0,
-                        height: greetH,
-                        child: _Greeting(
-                          brain: brain,
-                          onMic: _mic,
-                          onTrick: brain.trick,
-                          onRoom: () => _push(LumiRoom(brain: brain)),
-                        ),
-                      ),
-                      Positioned.fill(
-                        child: IgnorePointer(child: CustomPaint(painter: _LightPoolPainter(brain))),
                       ),
                     ],
                   ),
@@ -738,11 +806,24 @@ class _PageTilt extends StatelessWidget {
 /// The slab's sides are a few stacked copies of its outline, and the card
 /// itself rides on top; flat, it is just the card.
 class _Slab extends StatelessWidget {
-  const _Slab({super.key, required this.brain, required this.index, required this.child, this.radius = 14});
+  const _Slab({
+    super.key,
+    required this.brain,
+    required this.index,
+    required this.child,
+    double lift = 0,
+    (double, double, double, double)? layer,
+    this.radius = 14,
+  }) : layer = layer ?? (lift, 0, 0, 1);
   final LumiBrain brain;
   final int index;
   final Widget child;
   final double radius;
+
+  /// How high it stands off the page once tipped back and how far it moves
+  /// down the page (logical pixels), its delay in rising, and how much of it
+  /// still shows.
+  final (double, double, double, double) layer;
 
   // How far Lumi's landing pushes the slab in, and how many stacked
   // outlines draw its sides.
@@ -754,14 +835,17 @@ class _Slab extends StatelessWidget {
       valueListenable: brain.frame,
       child: child,
       builder: (context, _, child) {
-        // The cards rise one after another down the feed, so the page
-        // opens up into layers rather than lifting as one sheet.
-        final k = Curves.easeOutCubic.transform((brain.tiltAmount * 1.5 - index * 0.06).clamp(0.0, 1.0));
+        // The layers rise one after another, so the page opens up rather
+        // than lifting as one sheet.
+        final (lift, spread, delay, shows) = layer;
+        final tilt = brain.tiltAmount;
+        final k = Curves.easeOutCubic.transform((tilt * 1.5 - delay).clamp(0.0, 1.0));
         final press = brain.cardPress[index] ?? 0;
-        final depth = LumiBrain.slabHeight(index) * k;
+        final depth = lift * k;
+        final opacity = 1 - (1 - shows) * tilt;
         final r = BorderRadius.circular(radius);
         Matrix4 up(double z) => Matrix4.translationValues(0, 0, -z);
-        return Stack(
+        final slab = Stack(
           clipBehavior: Clip.none,
           children: [
             if (k > 0) ...[
@@ -829,6 +913,10 @@ class _Slab extends StatelessWidget {
             ),
           ],
         );
+        return Opacity(
+          opacity: opacity,
+          child: Transform.translate(offset: Offset(0, spread * k), child: slab),
+        );
       },
     );
   }
@@ -892,37 +980,6 @@ class _NoteFacePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_NoteFacePainter old) => old.note != note;
-}
-
-/// The pool of light Lumi casts on the cards while it glides over them.
-class _LightPoolPainter extends CustomPainter {
-  _LightPoolPainter(this.brain) : super(repaint: brain.frame);
-  final LumiBrain brain;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final k = brain.poolStrength;
-    if (k <= 0.01) return;
-    final c = brain.poolPos;
-    const r = 150.0;
-    canvas.drawCircle(
-      c,
-      r,
-      Paint()
-        ..blendMode = BlendMode.plus
-        ..shader = RadialGradient(
-          colors: [
-            const Color(0xFF9FD0FF).withValues(alpha: 0.42 * k),
-            const Color(0xFF5E8CFF).withValues(alpha: 0.16 * k),
-            const Color(0x005E8CFF),
-          ],
-          stops: const [0, 0.45, 1],
-        ).createShader(Rect.fromCircle(center: c, radius: r)),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _LightPoolPainter old) => false;
 }
 
 class _FlyingKey extends StatefulWidget {

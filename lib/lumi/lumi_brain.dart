@@ -125,9 +125,14 @@ class LumiBrain extends ChangeNotifier {
   double _flyT = -1;
   bool get flying => _flyT >= 0;
 
-  /// The feed cards' rects on the flat page, by index (null when a card is
-  /// not on screen), for Lumi to hop between. Set by the home page.
-  List<Rect?> Function()? cardRects;
+  /// The cards Lumi can hop between while the page is tipped back: each
+  /// one's rect on the flat page, how high it then stands off the page and
+  /// how far it moves down it (logical pixels), by index; null for cards
+  /// that are off screen or stay down. Set by the home page.
+  List<(Rect, double, double)?> Function()? hopCards;
+
+  /// How high the header stands off the tipped-back page, logical pixels.
+  static const headerLift = 70.0;
 
   /// How far each card is pressed in by Lumi landing on it, by index,
   /// springing back to 0.
@@ -136,7 +141,7 @@ class LumiBrain extends ChangeNotifier {
   // The hops: where Lumi's feet land on the page and on which card (-1 is
   // the header, where it floats), the hop under way and the time into it,
   // and when the page starts to tip back.
-  final _stops = <(Offset, int)>[];
+  final _stops = <(Offset, int, double, double)>[];
   int _leg = 0;
   double _legT = 0, _flyEnd = double.infinity;
   Offset _feet = Offset.zero; // on the page
@@ -146,40 +151,30 @@ class LumiBrain extends ChangeNotifier {
   double _feetZ = 0; // off the page, in world units (-Z)
   static const _crouch = 0.16, _land = 0.2, _dwell = 0.3;
 
-  /// How high a feed card stands off the tipped-back page, in logical
-  /// pixels, by its place in the feed. They step down the page like
-  /// stairs, so each card's front edge shows above the next one and the
-  /// page reads as layers; Lumi hops down the steps.
-  static double slabHeight(int index) => math.max(20, 78 - index * 11.0);
-
   /// How far into the fly-over tilt the page is, 0 (flat) to 1.
   double get tiltAmount => (pageTilt / _tiltMax).clamp(0, 1);
-
-  /// Where Lumi's light lands on the page and how bright it is.
-  Offset poolPos = Offset.zero;
-  double poolStrength = 0;
   static const _tiltMax = 0.82;
 
-  /// Tips the page back and lets Lumi hop down the feed from card to card,
-  /// each one dipping and lighting up as it lands, then hop back up to the
-  /// header and set everything back.
+  /// Tips the page back into a few layers and lets Lumi hop between them
+  /// card by card, each one dipping and lighting up as it lands, then hop
+  /// back up to the header and set everything back.
   void flyover() {
     if (flying || asleep || away || space == null || notes.isNotEmpty) return;
-    final view = scrollRect.deflate(8);
-    final cards = <(Rect, int)>[];
-    final rects = cardRects?.call() ?? const [];
-    for (var i = 0; i < rects.length; i++) {
-      final r = rects[i];
-      if (r == null || r.height < 50 || r.top < view.top || r.bottom > view.bottom) continue;
-      cards.add((r, i));
+    final cards = <(Rect, int, double, double)>[];
+    final all = hopCards?.call() ?? const [];
+    for (var i = 0; i < all.length; i++) {
+      final c = all[i];
+      if (c != null) cards.add((c.$1, i, c.$2, c.$3));
     }
+    // Down the layers and back up one before the header, zigzagging.
+    final order = [...cards, if (cards.length > 2) cards.first];
     _stops.clear();
     var side = 0.3;
-    for (final (r, i) in cards.take(4)) {
-      _stops.add((Offset(r.left + r.width * (side + _rnd.nextDouble() * 0.08), r.center.dy + 6), i));
+    for (final (r, i, lift, spread) in order) {
+      _stops.add((Offset(r.left + r.width * (side + _rnd.nextDouble() * 0.08), r.center.dy + 6), i, lift, spread));
       side = 1 - side - 0.08;
     }
-    _stops.add((Offset.zero, -1));
+    _stops.add((Offset.zero, -1, headerLift, 0));
     _leg = 0;
     _legT = 0;
     _flyEnd = double.infinity;
@@ -716,8 +711,9 @@ class LumiBrain extends ChangeNotifier {
       // back while the card dips under it.
       final header = home + Offset(0, _footLength(r) * s.ppu * _scale);
       (Offset, double) stop(int i) {
-        if (i < 0 || _stops[i].$2 < 0) return (header, 0.0);
-        return (_stops[i].$1, -slabHeight(_stops[i].$2) / s.ppu * k);
+        if (i < 0 || _stops[i].$2 < 0) return (header, -headerLift / s.ppu * k);
+        final (at, _, lift, spread) = _stops[i];
+        return (at + Offset(0, spread * k), -lift / s.ppu * k);
       }
 
       var lift = 0.0, lean = 0.0;
@@ -781,14 +777,10 @@ class LumiBrain extends ChangeNotifier {
         cardPress[i] = rest + (cardPress[i]! - rest) * math.exp(-dt * 7);
       }
       target = _feet;
-      poolPos = _feet;
-      final hopping = f >= 1.1 && _leg < _stops.length;
-      poolStrength = hopping ? k * (1 - 0.6 * lift) : poolStrength * math.exp(-dt * 6);
       if (f >= _flyEnd + 1.8) {
         _flyT = -1;
         pageTilt = pageYaw = pageLift = pagePush = 0;
         _hopLift = _hopLean = _hopUp = 0;
-        poolStrength = 0;
         cardPress.clear();
         _pos = home;
         _vel = Offset.zero;

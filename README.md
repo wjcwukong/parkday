@@ -9,10 +9,11 @@ The header stars Lumi, a little 3D lantern spirit rendered live with [Flutter Sc
   It blinks, follows your finger with its eyes and changes expression.
   - Notifications fly in as cards in the 3D scene (`lib/scene/note_card.dart`). Lumi catches one,
     tips it up to its mouth and swallows it whole, then tells you what it said.
-  - Tap the "Parkday" wordmark and the whole page tips back into perspective: the feed cards stand up
-    as slabs and Lumi hops down them card by card, crouching, arcing over and squashing as it lands, with
-    each card dipping and lighting up under it, then hops back up to the header. The scene camera swings
-    by the same transform as the widgets, so the 3D and the UI stay in register.
+  - Tap the "Parkday" wordmark and the page tips back into three floating layers, like the original:
+    the header, the fireworks card, and the reward and weather cards, each a thick block drawn apart
+    over the dark. Lumi hops between them card by card, crouching, arcing over and squashing as it
+    lands, with each card dipping and lighting up under it, then hops back up to the header. The scene
+    camera swings by the same transform as the widgets, so the 3D and the UI stay in register.
   - Pet Lumi slowly and it blushes, gets sleepy and falls asleep. Tap to wake it.
   - Shake it too fast and it gets dizzy. Tap it for a bounce.
   - Scroll the feed and Lumi rides the scrollbar.
