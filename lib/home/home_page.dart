@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -54,12 +55,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// drawn apart down it so every block's front edge shows. The search box
   /// stays down on the page and the rest of the feed fades away. Each entry
   /// is the card's lift and its move down the page (logical pixels), its
-  /// delay in rising, and how much of it still shows.
-  static (double, double, double, double) _layer(int index) => switch (index) {
-    0 => (0, 0, 0, 0.45),
-    1 => (80, 75, 0.12, 1),
-    2 || 3 => (64, 140, 0.24, 1),
-    _ => (0, 0, 0, 0),
+  /// delay in rising, how much of it still shows, and how out of focus it
+  /// goes (blur sigma), sharp at the front and softer further back.
+  static (double, double, double, double, double) _layer(int index) => switch (index) {
+    0 => (0, 0, 0, 0.45, 2),
+    1 => (80, 75, 0.12, 1, 0.9),
+    2 || 3 => (54, 140, 0.24, 1, 0),
+    _ => (0, 0, 0, 0, 0),
   };
 
   /// The raised cards' rects on the page and their lifts, for Lumi to hop
@@ -208,6 +210,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           brain: brain,
                           index: -1,
                           lift: LumiBrain.headerLift,
+                          blur: 2.2,
                           radius: 18,
                           child: Stack(
                             children: [
@@ -812,18 +815,19 @@ class _Slab extends StatelessWidget {
     required this.index,
     required this.child,
     double lift = 0,
-    (double, double, double, double)? layer,
+    double blur = 0,
+    (double, double, double, double, double)? layer,
     this.radius = 14,
-  }) : layer = layer ?? (lift, 0, 0, 1);
+  }) : layer = layer ?? (lift, 0, 0, 1, blur);
   final LumiBrain brain;
   final int index;
   final Widget child;
   final double radius;
 
   /// How high it stands off the page once tipped back and how far it moves
-  /// down the page (logical pixels), its delay in rising, and how much of it
-  /// still shows.
-  final (double, double, double, double) layer;
+  /// down the page (logical pixels), its delay in rising, how much of it
+  /// still shows, and how much it blurs.
+  final (double, double, double, double, double) layer;
 
   // How far Lumi's landing pushes the slab in, and how many stacked
   // outlines draw its sides.
@@ -837,8 +841,9 @@ class _Slab extends StatelessWidget {
       builder: (context, _, child) {
         // The layers rise one after another, so the page opens up rather
         // than lifting as one sheet.
-        final (lift, spread, delay, shows) = layer;
+        final (lift, spread, delay, shows, blur) = layer;
         final tilt = brain.tiltAmount;
+        final sigma = blur * tilt;
         final k = Curves.easeOutCubic.transform((tilt * 1.5 - delay).clamp(0.0, 1.0));
         final press = brain.cardPress[index] ?? 0;
         final depth = lift * k;
@@ -907,7 +912,13 @@ class _Slab extends StatelessWidget {
                       width: 1.5,
                     ),
                   ),
-                  child: child,
+                  // Depth of field, on the card's face only: a filter
+                  // around the whole slab would flatten its sides.
+                  child: ImageFiltered(
+                    enabled: sigma > 0.05,
+                    imageFilter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+                    child: child,
+                  ),
                 ),
               ),
             ),

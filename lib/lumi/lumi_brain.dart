@@ -698,11 +698,11 @@ class LumiBrain extends ChangeNotifier {
       final tout = Curves.easeInOutCubic.transform(((f - _flyEnd - 0.3) / 1.5).clamp(0, 1));
       final k = tin - tout;
       pageTilt = _tiltMax * k;
-      pageLift = 30 * k;
-      pagePush = 210 * k;
-      // The page is turned a little so its left edge and the slabs' sides
-      // show, and turns a little more towards wherever Lumi is.
-      final yawTo = (0.07 - 0.12 * ((_pos.dx - s.size.width / 2) / (s.size.width / 2))) * k;
+      pageLift = 80 * k;
+      pagePush = 50 * k;
+      // The page turns a little towards wherever Lumi is, so the slabs'
+      // sides show.
+      final yawTo = -0.12 * ((_pos.dx - s.size.width / 2) / (s.size.width / 2)) * k;
       pageYaw += (yawTo - pageYaw) * (1 - math.exp(-dt * 2));
       _scaleTarget = 1 - 0.4 * k;
 
