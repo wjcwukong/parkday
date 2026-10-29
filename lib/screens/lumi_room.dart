@@ -42,7 +42,7 @@ class LumiRoom extends StatefulWidget {
 class _LumiRoomState extends State<LumiRoom> {
   final scene = Scene();
   LumiRig? rig;
-  double azimuth = 0.55, elevation = 0.33, _azVel = 0;
+  double azimuth = 0.3, elevation = 0.3, _azVel = 0;
   double t = 0;
   Size size = Size.zero;
   late PerspectiveCamera camera = _cam();
@@ -106,7 +106,10 @@ class _LumiRoomState extends State<LumiRoom> {
 
     final wood = _pbr(0.3, 0.15, 0.08, rough: 0.7);
     final woodDark = _pbr(0.12, 0.06, 0.04);
-    final wall = _pbr(0.2, 0.1, 0.14, rough: 0.9);
+    // Warm plaster walls, pale pink like the original, so the lantern and
+    // fairy lights wash them in a soft glow instead of sinking into them.
+    final wall = _pbr(0.8, 0.56, 0.6, rough: 0.95);
+    final wallSeam = _pbr(0.66, 0.44, 0.5, rough: 0.95);
     final rugA = _pbr(0.85, 0.55, 0.62);
     final rugB = _pbr(0.98, 0.82, 0.78);
 
@@ -176,7 +179,7 @@ class _LumiRoomState extends State<LumiRoom> {
     scene.add(_mesh(CuboidGeometry(vm.Vector3(3.6, 0.14, 0.04)), woodDark, at: vm.Vector3(0.19, 0.24, 1.47)));
     scene.add(_mesh(CuboidGeometry(vm.Vector3(0.04, 0.14, 2.5)), woodDark, at: vm.Vector3(-1.54, 0.24, 0.25)));
     // vertical board seams on both walls
-    final seams = InstancedMesh(geometry: CuboidGeometry(vm.Vector3.all(1)), material: woodDark);
+    final seams = InstancedMesh(geometry: CuboidGeometry(vm.Vector3.all(1)), material: wallSeam);
     for (var x = -1.25; x < 1.9; x += 0.36) {
       if ((x - 0.55).abs() < 0.7) continue; // the round window
       seams.addInstance(

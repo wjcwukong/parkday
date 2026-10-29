@@ -185,9 +185,9 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
       ..quality = DepthOfFieldQuality.medium;
     final sun = Node();
     sun.addComponent(
-      DirectionalLightComponent(
+      // The component ignores DirectionalLight.direction, so aim it here.
+      DirectionalLightComponent.aimed(
         DirectionalLight(
-          direction: vm.Vector3(0.4, -1, 0.5),
           intensity: 2.8,
           color: vm.Vector3(1, 0.93, 0.85),
           castsShadow: true,
@@ -195,6 +195,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
           shadowCascadeCount: 2,
           shadowSoftness: 0.15,
         ),
+        vm.Vector3(0.4, -1, 0.5),
       ),
     );
     scene.add(sun);
