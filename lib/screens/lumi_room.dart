@@ -7,6 +7,7 @@ import 'package:vector_math/vector_math.dart' as vm;
 
 import '../lumi/lumi_brain.dart';
 import '../scene/lumi_rig.dart';
+import '../scene/space.dart' show cardQuad;
 import '../theme.dart';
 
 PhysicallyBasedMaterial _pbr(double r, double g, double b, {double rough = 0.8, double emissive = 0}) {
@@ -210,6 +211,26 @@ class _LumiRoomState extends State<LumiRoom> {
       ),
     );
     scene.add(_mesh(SphereGeometry(radius: 0.2), unlit(5, 5, 5.6), at: vm.Vector3(0.68, 1.85, 1.42)));
+
+    // Lumi's board: a pinned paper note on the back wall, a real widget on
+    // a card in the scene.
+    const board = Size(150, 120);
+    scene.add(
+      Node(name: 'board')
+        ..position = vm.Vector3(-0.92, 1.95, 1.465)
+        ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 0, 1), 0.05)
+        ..addComponent(
+          WidgetComponent(
+            size: board,
+            pixelRatio: 3,
+            worldHeight: 0.5,
+            geometry: cardQuad(0.5 * board.width / board.height, 0.5),
+            input: WidgetInput.manual,
+            update: const WidgetUpdatePolicy.interval(Duration(seconds: 2)),
+            child: const _Board(),
+          ),
+        ),
+    );
 
     // fairy lights along the top of both walls
     final bulbs = InstancedMesh(
@@ -544,6 +565,56 @@ class _LumiRoomState extends State<LumiRoom> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// The note pinned on Lumi's wall.
+class _Board extends StatelessWidget {
+  const _Board();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget line(IconData icon, String text, Color c) => Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 11, color: c),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: Pd.t(10, w: FontWeight.w600, c: const Color(0xFF5A4A5E)),
+          ),
+        ],
+      ),
+    );
+    return Container(
+      margin: const EdgeInsets.all(4),
+      padding: const EdgeInsets.fromLTRB(12, 14, 10, 8),
+      decoration: BoxDecoration(color: const Color(0xFFE9DCCB), borderRadius: BorderRadius.circular(4)),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Lumi's board",
+                style: Pd.t(12, w: FontWeight.w700, c: const Color(0xFF3E3044)),
+              ),
+              line(Icons.vpn_key_rounded, 'Find 5 keys', const Color(0xFFD9A23A)),
+              line(Icons.auto_awesome_rounded, 'Fireworks 9:15', const Color(0xFFB765C9)),
+              line(Icons.bedtime_rounded, 'Nap on cushion', const Color(0xFF6C7FD6)),
+            ],
+          ),
+          const Positioned(
+            top: -12,
+            left: 0,
+            right: 0,
+            child: Center(child: CircleAvatar(radius: 4, backgroundColor: Color(0xFFE0504E))),
+          ),
+        ],
       ),
     );
   }
