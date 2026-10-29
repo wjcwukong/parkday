@@ -3,7 +3,7 @@
 //
 //   flutter run -d macos -t tool/shot.dart --dart-define=SHOT=room
 //
-// SHOT is home, room, map or fireworks; WAIT is the delay in ms before the
+// SHOT is home, room, map, fireworks, stars or sky; WAIT is the delay in ms before the
 // capture. The PNG lands in the app's temp folder (printed as SHOT_SAVED).
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -15,6 +15,8 @@ import 'package:parkday/lumi/lumi_brain.dart';
 import 'package:parkday/screens/fireworks_show.dart';
 import 'package:parkday/screens/lumi_room.dart';
 import 'package:parkday/screens/park_map.dart';
+import 'package:parkday/screens/sky_lift.dart';
+import 'package:parkday/screens/star_catch.dart';
 import 'package:parkday/theme.dart';
 
 const _shot = String.fromEnvironment('SHOT', defaultValue: 'home');
@@ -56,6 +58,8 @@ class _ShotAppState extends State<_ShotApp> {
     'room' => LumiRoom(brain: brain),
     'map' => ParkMapScreen(brain: brain),
     'fireworks' => FireworksShow(brain: brain),
+    'stars' => StarCatchGame(brain: brain),
+    'sky' => SkyLiftGame(brain: brain, onBest: (_) {}),
     _ => const HomePage(),
   };
 

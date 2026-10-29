@@ -107,10 +107,10 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
   // The camera opens on the whole island, then dollies in and follows
   // Lumi when it hops off, like the original. Any pan or pinch hands it
   // to the user.
-  double azimuth = 0.1, elevation = 0.95, distance = 21.5;
+  double azimuth = 0.1, elevation = 0.85, distance = 25;
   vm.Vector3 target = vm.Vector3(0, 0, 1.1);
   static const _azGoal = 0.1;
-  double _elGoal = 0.95, _distGoal = 21.5;
+  double _elGoal = 0.85, _distGoal = 25;
   vm.Vector3 _targetGoal = vm.Vector3(0, 0, 1.1);
   bool _userCam = false;
   late PerspectiveCamera camera = _cam();
@@ -162,7 +162,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
           sunColor: vm.Vector3.zero(),
         ),
       ),
-      environmentIntensity: 0.7,
+      environmentIntensity: 0.55,
       toneMapping: ToneMappingMode.pbrNeutral,
       exposure: 1.0,
       colorGradingEnabled: true,
@@ -177,6 +177,11 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
       ambientOcclusionIntensity: 1.2,
       vignetteEnabled: true,
       vignetteIntensity: 0.35,
+      // The blue evening haze the original lays over the whole park.
+      fogEnabled: true,
+      fogColor: vm.Vector3(0.22, 0.3, 0.55),
+      fogDensity: 0.012,
+      fogMaxOpacity: 0.35,
     );
     scene.depthOfField
       ..enabled = true
@@ -188,14 +193,14 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
       // The component ignores DirectionalLight.direction, so aim it here.
       DirectionalLightComponent.aimed(
         DirectionalLight(
-          intensity: 2.8,
-          color: vm.Vector3(1, 0.93, 0.85),
+          intensity: 1.7,
+          color: vm.Vector3(1, 0.86, 0.72),
           castsShadow: true,
           shadowMaxDistance: 40,
           shadowCascadeCount: 2,
           shadowSoftness: 0.15,
         ),
-        vm.Vector3(0.4, -1, 0.5),
+        vm.Vector3(0.5, -0.8, 0.6),
       ),
     );
     scene.add(sun);
@@ -203,22 +208,22 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
     // water and island
     scene.add(
       _m(
-        CylinderGeometry(bottomRadius: 14, topRadius: 14, height: 0.2, radialSegments: 64),
-        _pbr(0.03, 0.045, 0.15, rough: 0.2),
+        CylinderGeometry(bottomRadius: 45, topRadius: 45, height: 0.2, radialSegments: 96),
+        _pbr(0.012, 0.018, 0.06, rough: 0.35),
         at: vm.Vector3(0, -0.45, 0),
       ),
     );
     scene.add(
       _m(
-        CylinderGeometry(bottomRadius: 6.6, topRadius: 6.3, height: 0.7, radialSegments: 64),
+        CylinderGeometry(bottomRadius: 5.9, topRadius: 5.6, height: 0.7, radialSegments: 64),
         _pbr(0.3, 0.24, 0.3),
         at: vm.Vector3(0, -0.36, 0),
       ),
     );
     scene.add(
       _m(
-        CylinderGeometry(bottomRadius: 6.2, topRadius: 6.2, height: 0.1, radialSegments: 64),
-        _pbr(0.17, 0.56, 0.3),
+        CylinderGeometry(bottomRadius: 5.5, topRadius: 5.5, height: 0.1, radialSegments: 64),
+        _pbr(0.11, 0.42, 0.27),
         at: vm.Vector3(0, 0.0, 0),
       ),
     );
@@ -357,7 +362,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
     final pickets = InstancedMesh(geometry: CuboidGeometry(vm.Vector3(1, 1, 1)), material: _pbr(0.92, 0.9, 0.88));
     for (var i = 0; i < 26; i++) {
       final a = -math.pi / 2 + (i < 13 ? -1 : 1) * (0.2 + (i % 13) * 0.045);
-      final p = vm.Vector3(math.cos(a) * 5.75, 0, math.sin(a) * 5.75);
+      final p = vm.Vector3(math.cos(a) * 5.1, 0, math.sin(a) * 5.1);
       pickets.addInstance(
         vm.Matrix4.translation(p + vm.Vector3(0, 0.12, 0))
           ..rotateY(-a)
@@ -390,7 +395,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
         (p - _gate).length > 1.1 + r &&
         !pathPts.any((q) => (q - p).length < 0.22 + r);
     for (var i = 0; i < 110; i++) {
-      final a = rnd.nextDouble() * math.pi * 2, r = 1.0 + math.sqrt(rnd.nextDouble()) * 4.9;
+      final a = rnd.nextDouble() * math.pi * 2, r = 1.0 + math.sqrt(rnd.nextDouble()) * 4.2;
       final p = vm.Vector3(math.cos(a) * r, 0, math.sin(a) * r);
       final s = 0.45 + rnd.nextDouble() * 0.6;
       if (!clear(p, 0.25 * s)) continue;
@@ -422,7 +427,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
     // Big boulders round the rim of the island.
     for (var i = 0; i < 26; i++) {
       final a = i / 26 * math.pi * 2 + rnd.nextDouble() * 0.12;
-      final r = 6.05 + rnd.nextDouble() * 0.3;
+      final r = 5.35 + rnd.nextDouble() * 0.3;
       final sz = 0.3 + rnd.nextDouble() * 0.3;
       rocks.addInstance(
         vm.Matrix4.translation(vm.Vector3(math.cos(a) * r, -0.05, math.sin(a) * r))
@@ -447,7 +452,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
     }
     for (var i = 0; i < 12; i++) {
       final a = i / 12 * math.pi * 2 + 0.2;
-      lamps.add(vm.Vector3(math.cos(a) * 5.9, 0, math.sin(a) * 5.9));
+      lamps.add(vm.Vector3(math.cos(a) * 5.2, 0, math.sin(a) * 5.2));
     }
     for (final p in lamps) {
       scene.add(

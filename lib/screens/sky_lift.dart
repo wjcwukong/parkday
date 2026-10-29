@@ -77,7 +77,7 @@ class _SkyLiftGameState extends State<SkyLiftGame> {
     scene.add(LumiBrain.backdrop());
     final r = await widget.brain.makeRig();
     r.showUmbrella = false;
-    r.root.scale = vm.Vector3.all(0.5);
+    r.root.scale = vm.Vector3.all(0.68);
     scene.add(r.root);
     if (mounted) setState(() => rig = r);
   }
@@ -353,19 +353,33 @@ class _SkyPainter extends CustomPainter {
         canvas.drawCircle(mc + const Offset(-30, -20), 18, Paint()..color = const Color(0x22B8A88A));
         canvas.drawCircle(mc + const Offset(36, 28), 26, Paint()..color = const Color(0x1AB8A88A));
       }
-      // ground: the park's lanterns far below
-      final gy = g.screenYFor(-8);
+      // Ground: the park far below, sunk in a warm sunset haze that fades
+      // up into the sky rather than a hard horizon, with its lanterns
+      // twinkling through.
+      final gy = g.screenYFor(-30);
       if (gy < size.height + 40) {
+        final haze = Rect.fromLTRB(0, gy - 140, size.width, size.height + 50);
         canvas.drawRect(
-          Rect.fromLTRB(0, gy, size.width, size.height + 50),
-          Paint()..color = const Color(0xFF6B4A8E),
+          haze,
+          Paint()
+            ..shader = LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [bottom.withValues(alpha: 0), const Color(0xFFFFC7A8), const Color(0xFF7A4A72)],
+              stops: [0, 140 / haze.height, 1],
+            ).createShader(haze),
         );
         final rnd = math.Random(2);
         for (var i = 0; i < 30; i++) {
+          final p = Offset(rnd.nextDouble() * size.width, gy + 20 + rnd.nextDouble() * 160);
           canvas.drawCircle(
-            Offset(rnd.nextDouble() * size.width, gy + 6 + rnd.nextDouble() * 40),
-            2,
-            Paint()..color = const Color(0xFFFFD27A),
+            p,
+            5,
+            Paint()
+              ..blendMode = BlendMode.plus
+              ..shader = RadialGradient(
+                colors: [const Color(0x88FFE2A8), const Color(0x00FFE2A8)],
+              ).createShader(Rect.fromCircle(center: p, radius: 5)),
           );
         }
       }

@@ -42,7 +42,7 @@ class LumiRoom extends StatefulWidget {
 class _LumiRoomState extends State<LumiRoom> {
   final scene = Scene();
   LumiRig? rig;
-  double azimuth = 0.3, elevation = 0.3, _azVel = 0;
+  double azimuth = 0.15, elevation = 0.28, _azVel = 0;
   double t = 0;
   Size size = Size.zero;
   late PerspectiveCamera camera = _cam();
@@ -65,7 +65,7 @@ class _LumiRoomState extends State<LumiRoom> {
   }
 
   PerspectiveCamera _cam() {
-    const r = 12.5;
+    const r = 12.0;
     final target = vm.Vector3(0, 0.55, 0.1);
     final eye =
         target +
@@ -372,7 +372,7 @@ class _LumiRoomState extends State<LumiRoom> {
 
     final r = await widget.brain.makeRig();
     r.showUmbrella = false;
-    r.root.scale = vm.Vector3.all(0.62);
+    r.root.scale = vm.Vector3.all(0.85);
     scene.add(r.root);
     _syncShelf(r.hat);
     if (mounted) setState(() => rig = r);
@@ -394,7 +394,7 @@ class _LumiRoomState extends State<LumiRoom> {
     // Lumi first
     final r = rig;
     if (r == null) return;
-    final lumiHit = ray.intersectsWithSphere(vm.Sphere.centerRadius(lumiPos, 0.45));
+    final lumiHit = ray.intersectsWithSphere(vm.Sphere.centerRadius(lumiPos, 0.6));
     if (lumiHit != null) {
       if (napping) {
         napping = false;
