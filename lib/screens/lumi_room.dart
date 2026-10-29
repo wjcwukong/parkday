@@ -49,6 +49,7 @@ class _LumiRoomState extends State<LumiRoom> {
   final hatSpots = <Hat, vm.Vector3>{};
   final hatNodes = <Hat, Node>{};
   final cushion = vm.Vector3(0.95, 0.35, -0.55);
+  Node? fireflies;
   bool napping = false;
   vm.Vector3 lumiTarget = vm.Vector3(-0.15, 1.55, 0.1);
   vm.Vector3 lumiPos = vm.Vector3(-0.15, 1.55, 0.1);
@@ -76,13 +77,34 @@ class _LumiRoomState extends State<LumiRoom> {
 
   Future<void> _build() async {
     await Scene.initializeStaticResources();
-    scene.environmentIntensity = 0.22;
-    scene.toneMapping = ToneMappingMode.aces;
-    scene.exposure = 1.1;
+    // Night in the treehouse, like the original: a dusky sky, a dark room
+    // lit by a paper lantern and the moon, fairy lights and fireflies that
+    // bloom, and soft contact shadows.
+    scene.environmentSettings = EnvironmentSettings(
+      skybox: Skybox(
+        GradientSkySource(
+          zenithColor: vm.Vector3(0.008, 0.008, 0.035),
+          horizonColor: vm.Vector3(0.025, 0.028, 0.08),
+          groundColor: vm.Vector3(0.01, 0.01, 0.03),
+          sunColor: vm.Vector3.zero(),
+        ),
+      ),
+      environmentIntensity: 0.1,
+      toneMapping: ToneMappingMode.pbrNeutral,
+      exposure: 1.0,
+      bloomEnabled: true,
+      bloomThreshold: 0.95,
+      bloomIntensity: 0.28,
+      bloomScatter: 0.55,
+      ambientOcclusionEnabled: true,
+      ambientOcclusionRadius: 0.3,
+      vignetteEnabled: true,
+      vignetteIntensity: 0.45,
+    );
 
-    final wood = _pbr(0.42, 0.24, 0.14, rough: 0.7);
-    final woodDark = _pbr(0.18, 0.09, 0.06);
-    final wall = _pbr(0.30, 0.17, 0.2, rough: 0.9);
+    final wood = _pbr(0.3, 0.15, 0.08, rough: 0.7);
+    final woodDark = _pbr(0.12, 0.06, 0.04);
+    final wall = _pbr(0.2, 0.1, 0.14, rough: 0.9);
     final rugA = _pbr(0.85, 0.55, 0.62);
     final rugB = _pbr(0.98, 0.82, 0.78);
 
@@ -124,11 +146,7 @@ class _LumiRoomState extends State<LumiRoom> {
     }
     for (var k = 0; k < 7; k++) {
       scene.add(
-        _mesh(
-          CuboidGeometry(vm.Vector3(0.48, 0.04, 0.05)),
-          woodDark,
-          at: vm.Vector3(-1.1, -0.35 - k * 0.3, -1.6),
-        ),
+        _mesh(CuboidGeometry(vm.Vector3(0.48, 0.04, 0.05)), woodDark, at: vm.Vector3(-1.1, -0.35 - k * 0.3, -1.6)),
       );
     }
 
@@ -147,12 +165,12 @@ class _LumiRoomState extends State<LumiRoom> {
     scene.add(
       _mesh(
         DiscGeometry(radius: 0.55, segments: 40),
-        unlit(0.06, 0.08, 0.32)..depthLayer = 1,
+        unlit(0.08, 0.11, 0.42)..depthLayer = 1,
         at: vm.Vector3(0.55, 1.75, 1.47),
         rot: vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), -math.pi / 2),
       ),
     );
-    scene.add(_mesh(SphereGeometry(radius: 0.2), unlit(2.2, 2.3, 2.6), at: vm.Vector3(0.68, 1.85, 1.42)));
+    scene.add(_mesh(SphereGeometry(radius: 0.2), unlit(5, 5, 5.6), at: vm.Vector3(0.68, 1.85, 1.42)));
 
     // fairy lights along the top of both walls
     final bulbs = InstancedMesh(
@@ -166,7 +184,7 @@ class _LumiRoomState extends State<LumiRoom> {
         final p = a + (b - a) * f - vm.Vector3(0, math.sin(f * math.pi) * sag, 0);
         bulbs.addInstance(
           vm.Matrix4.translation(p)..scaleByVector3(vm.Vector3.all(0.045)),
-          color: vm.Vector4(2.4, 1.6, 0.6, 1),
+          color: vm.Vector4(6, 3.8, 1.4, 1),
         );
       }
     }
@@ -177,9 +195,7 @@ class _LumiRoomState extends State<LumiRoom> {
     scene.add(Node()..addComponent(InstancedMeshComponent(bulbs)));
 
     // floor rug
-    scene.add(
-      _mesh(DiscGeometry(radius: 1.0, segments: 48), rugA..depthLayer = 1, at: vm.Vector3(-0.1, 0.161, 0.1)),
-    );
+    scene.add(_mesh(DiscGeometry(radius: 1.0, segments: 48), rugA..depthLayer = 1, at: vm.Vector3(-0.1, 0.161, 0.1)));
     scene.add(
       _mesh(
         RingGeometry(innerRadius: 0.5, outerRadius: 0.72, segments: 48),
@@ -212,27 +228,31 @@ class _LumiRoomState extends State<LumiRoom> {
         at: vm.Vector3(1.5, 0.9, 0.9),
       ),
     );
+    // A paper lantern for a shade: a glowing drum with dark ribs.
     scene.add(
       _mesh(
-        CylinderGeometry(bottomRadius: 0.26, topRadius: 0.16, height: 0.36, radialSegments: 24),
-        _pbr(1.0, 0.85, 0.6, emissive: 1.6),
+        CylinderGeometry(bottomRadius: 0.2, topRadius: 0.2, height: 0.5, radialSegments: 24),
+        _pbr(1.0, 0.86, 0.66, emissive: 4),
         at: vm.Vector3(1.5, 1.72, 0.9),
       ),
     );
+    for (var k = 0; k < 5; k++) {
+      scene.add(
+        _mesh(
+          TorusGeometry(radius: 0.205, tubeRadius: 0.012, radialSegments: 24),
+          woodDark,
+          at: vm.Vector3(1.5, 1.5 + k * 0.11, 0.9),
+        ),
+      );
+    }
     final lamp = Node()..position = vm.Vector3(1.4, 1.6, 0.6);
-    lamp.addComponent(
-      PointLightComponent(PointLight(color: vm.Vector3(1.0, 0.7, 0.4), intensity: 7, range: 7)),
-    );
+    lamp.addComponent(PointLightComponent(PointLight(color: vm.Vector3(1.0, 0.68, 0.38), intensity: 9, range: 6)));
     scene.add(lamp);
     final moonLight = Node()..position = vm.Vector3(0.4, 2.0, 0.6);
-    moonLight.addComponent(
-      PointLightComponent(PointLight(color: vm.Vector3(0.5, 0.6, 1.0), intensity: 3, range: 5)),
-    );
+    moonLight.addComponent(PointLightComponent(PointLight(color: vm.Vector3(0.5, 0.6, 1.0), intensity: 3, range: 5)));
     scene.add(moonLight);
     final fill = Node()..position = vm.Vector3(-1.0, 2.6, -2.5);
-    fill.addComponent(
-      PointLightComponent(PointLight(color: vm.Vector3(0.75, 0.6, 1.0), intensity: 6, range: 9)),
-    );
+    fill.addComponent(PointLightComponent(PointLight(color: vm.Vector3(0.55, 0.45, 1.0), intensity: 2.5, range: 9)));
     scene.add(fill);
 
     // potted plant
@@ -255,6 +275,32 @@ class _LumiRoomState extends State<LumiRoom> {
         ),
       );
     }
+
+    // Fireflies drifting round the island, and a lantern hanging off a
+    // branch outside.
+    fireflies = Node();
+    final flies = InstancedMesh(
+      geometry: SphereGeometry(radius: 1, segments: 8, rings: 5),
+      material: unlit(1, 1, 1),
+      sortTransparentInstances: false,
+    );
+    final rnd = math.Random(7);
+    for (var i = 0; i < 26; i++) {
+      final a = rnd.nextDouble() * math.pi * 2, r = 2.6 + rnd.nextDouble() * 1.8;
+      flies.addInstance(
+        vm.Matrix4.translation(vm.Vector3(math.cos(a) * r, -1.6 + rnd.nextDouble() * 4.4, math.sin(a) * r))
+          ..scaleByVector3(vm.Vector3.all(0.03 + rnd.nextDouble() * 0.03)),
+        color: vm.Vector4(5, 3.2, 1.1, 1),
+      );
+    }
+    fireflies!.addComponent(InstancedMeshComponent(flies));
+    scene.add(fireflies!);
+    final hanging = Node()..position = vm.Vector3(1.3, 3.6, 1.9);
+    hanging.add(
+      _mesh(CylinderGeometry(bottomRadius: 0.012, topRadius: 0.012, height: 0.9), woodDark, at: vm.Vector3(0, 0.45, 0)),
+    );
+    hanging.add(_mesh(SphereGeometry(radius: 0.16), _pbr(1.0, 0.75, 0.45, emissive: 5)));
+    scene.add(hanging);
 
     // hat shelf on the left wall
     scene.add(_mesh(CuboidGeometry(vm.Vector3(0.3, 0.06, 2.1)), wood, at: vm.Vector3(-1.4, 1.28, 0.3)));
@@ -332,6 +378,8 @@ class _LumiRoomState extends State<LumiRoom> {
 
   void _tick(double dt) {
     t += dt;
+    fireflies?.rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), t * 0.08);
+    fireflies?.position = vm.Vector3(0, math.sin(t * 0.7) * 0.08, 0);
     if (!_dragging) {
       azimuth += _azVel * dt;
       _azVel *= math.exp(-dt * 3);

@@ -110,26 +110,55 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
           math.sin(elevation) * distance,
           -math.cos(azimuth) * math.cos(elevation) * distance,
         );
-    return PerspectiveCamera(
-      fovRadiansY: 48 * vm.degrees2Radians,
-      position: eye,
-      target: target,
-      fovFar: 120,
-    );
+    return PerspectiveCamera(fovRadiansY: 48 * vm.degrees2Radians, position: eye, target: target, fovFar: 120);
   }
 
   Future<void> _build() async {
     await Scene.initializeStaticResources();
-    scene.toneMapping = ToneMappingMode.aces;
-    scene.environmentIntensity = 0.55;
-    scene.exposure = 1.0;
+    // An evening look like the original's: a night sky and dark water
+    // around a saturated island, soft shadows and contact darkening, warm
+    // lamps that bloom, and a tilt-shift blur that makes the park a toy.
+    scene.environmentSettings = EnvironmentSettings(
+      skybox: Skybox(
+        GradientSkySource(
+          zenithColor: vm.Vector3(0.012, 0.018, 0.06),
+          horizonColor: vm.Vector3(0.04, 0.06, 0.16),
+          groundColor: vm.Vector3(0.02, 0.03, 0.08),
+          sunColor: vm.Vector3.zero(),
+        ),
+      ),
+      environmentIntensity: 0.7,
+      toneMapping: ToneMappingMode.pbrNeutral,
+      exposure: 1.0,
+      colorGradingEnabled: true,
+      saturation: 1.05,
+      contrast: 1.05,
+      bloomEnabled: true,
+      bloomThreshold: 1.0,
+      bloomIntensity: 0.3,
+      bloomScatter: 0.6,
+      ambientOcclusionEnabled: true,
+      ambientOcclusionRadius: 0.35,
+      ambientOcclusionIntensity: 1.2,
+      vignetteEnabled: true,
+      vignetteIntensity: 0.35,
+    );
+    scene.depthOfField
+      ..enabled = true
+      ..fStop = 0.6
+      ..blurScale = 10
+      ..quality = DepthOfFieldQuality.medium;
     final sun = Node();
     sun.addComponent(
       DirectionalLightComponent(
         DirectionalLight(
           direction: vm.Vector3(0.4, -1, 0.5),
-          intensity: 2.6,
-          color: vm.Vector3(1, 0.95, 0.88),
+          intensity: 2.8,
+          color: vm.Vector3(1, 0.93, 0.85),
+          castsShadow: true,
+          shadowMaxDistance: 40,
+          shadowCascadeCount: 2,
+          shadowSoftness: 0.15,
         ),
       ),
     );
@@ -139,25 +168,25 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
     scene.add(
       _m(
         CylinderGeometry(bottomRadius: 14, topRadius: 14, height: 0.2, radialSegments: 64),
-        _pbr(0.12, 0.38, 0.62, rough: 0.3),
+        _pbr(0.03, 0.045, 0.15, rough: 0.2),
         at: vm.Vector3(0, -0.45, 0),
       ),
     );
     scene.add(
       _m(
         CylinderGeometry(bottomRadius: 6.6, topRadius: 6.3, height: 0.7, radialSegments: 64),
-        _pbr(0.85, 0.75, 0.55),
+        _pbr(0.3, 0.24, 0.3),
         at: vm.Vector3(0, -0.36, 0),
       ),
     );
     scene.add(
       _m(
         CylinderGeometry(bottomRadius: 6.2, topRadius: 6.2, height: 0.1, radialSegments: 64),
-        _pbr(0.36, 0.66, 0.32),
+        _pbr(0.17, 0.56, 0.3),
         at: vm.Vector3(0, 0.0, 0),
       ),
     );
-    final hill = _pbr(0.32, 0.6, 0.3);
+    final hill = _pbr(0.13, 0.48, 0.25);
     final rnd = math.Random(4);
     for (var i = 0; i < 7; i++) {
       final a = rnd.nextDouble() * math.pi * 2, r = 3.6 + rnd.nextDouble() * 2;
@@ -174,9 +203,10 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
     // stepping-stone paths from the plaza to each ride
     final stones = InstancedMesh(
       geometry: CylinderGeometry(bottomRadius: 1, topRadius: 1, height: 1, radialSegments: 12),
-      material: _pbr(0.78, 0.68, 0.58),
+      material: _pbr(0.45, 0.35, 0.3),
     );
     final plaza = _plaza;
+    final pathPts = <vm.Vector3>[];
     for (final ride in rides) {
       final end = vm.Vector3(ride.x, 0, ride.z);
       final mid = (plaza + end) * 0.5 + vm.Vector3(rnd.nextDouble() - 0.5, 0, rnd.nextDouble() - 0.5) * 1.2;
@@ -185,6 +215,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
       for (var i = 0; i <= n; i++) {
         final f = i / n;
         final p = plaza * ((1 - f) * (1 - f)) + mid * (2 * f * (1 - f)) + end * (f * f);
+        pathPts.add(p);
         stones.addInstance(
           vm.Matrix4.translation(p + vm.Vector3(0, 0.06, 0))
             ..scaleByVector3(vm.Vector3(0.13 + rnd.nextDouble() * 0.04, 0.03, 0.13)),
@@ -195,45 +226,131 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
     scene.add(
       _m(
         CylinderGeometry(bottomRadius: 0.7, topRadius: 0.7, height: 0.05, radialSegments: 32),
-        _pbr(0.85, 0.76, 0.66),
+        _pbr(0.5, 0.42, 0.44),
         at: plaza + vm.Vector3(0, 0.06, 0),
       ),
     );
 
-    // trees and rocks
-    final trunk = _pbr(0.45, 0.3, 0.2), leaf = _pbr(0.18, 0.48, 0.24), leaf2 = _pbr(0.28, 0.58, 0.26);
-    final rock = _pbr(0.55, 0.52, 0.56);
-    for (var i = 0; i < 34; i++) {
-      final a = rnd.nextDouble() * math.pi * 2, r = 1.2 + rnd.nextDouble() * 4.8;
+    // A fountain on the plaza.
+    scene.add(
+      _m(
+        CylinderGeometry(bottomRadius: 0.46, topRadius: 0.42, height: 0.12, radialSegments: 32),
+        _pbr(0.72, 0.68, 0.74),
+        at: plaza + vm.Vector3(0, 0.12, 0),
+      ),
+    );
+    scene.add(
+      _m(
+        CylinderGeometry(bottomRadius: 0.36, topRadius: 0.36, height: 0.02, radialSegments: 32),
+        PhysicallyBasedMaterial()
+          ..baseColorFactor = vm.Vector4(0.1, 0.4, 0.85, 1)
+          ..roughnessFactor = 0.1
+          ..metallicFactor = 0
+          ..emissiveFactor = vm.Vector4(0.02, 0.12, 0.3, 1),
+        at: plaza + vm.Vector3(0, 0.18, 0),
+      ),
+    );
+
+    // Trees, bushes and rocks, instanced by material. Canopies are one or
+    // two soft blobs in a few greens, with the odd blossom tree.
+    InstancedMesh inst(Geometry g, fs.Material m) => InstancedMesh(geometry: g, material: m);
+    final blob = SphereGeometry(radius: 1, segments: 16, rings: 10);
+    final trunks = inst(CylinderGeometry(bottomRadius: 0.05, topRadius: 0.04, height: 0.4), _pbr(0.22, 0.12, 0.07));
+    final canopies = [
+      inst(blob, _pbr(0.04, 0.33, 0.24)),
+      inst(blob, _pbr(0.12, 0.48, 0.27)),
+      inst(blob, _pbr(0.28, 0.55, 0.14)),
+      inst(blob, _pbr(0.85, 0.42, 0.58)),
+      inst(blob, _pbr(0.85, 0.38, 0.1)),
+    ];
+    final rocks = inst(IcosphereGeometry(radius: 1, subdivisions: 1), _pbr(0.4, 0.33, 0.4));
+    bool clear(vm.Vector3 p, double r) =>
+        !rides.any((rd) => (vm.Vector3(rd.x, 0, rd.z) - p).length < 1.0 + r) &&
+        (p - plaza).length > 0.9 + r &&
+        !pathPts.any((q) => (q - p).length < 0.22 + r);
+    for (var i = 0; i < 110; i++) {
+      final a = rnd.nextDouble() * math.pi * 2, r = 1.0 + math.sqrt(rnd.nextDouble()) * 4.9;
       final p = vm.Vector3(math.cos(a) * r, 0, math.sin(a) * r);
-      if (rides.any((rd) => (vm.Vector3(rd.x, 0, rd.z) - p).length < 1.1)) continue;
-      if ((p - plaza).length < 1.0) continue;
-      if (i % 5 == 0) {
-        scene.add(
-          _m(
-            IcosphereGeometry(radius: 1, subdivisions: 1),
-            rock,
-            at: p + vm.Vector3(0, 0.12, 0),
-            scale: vm.Vector3.all(0.18 + rnd.nextDouble() * 0.2),
-          ),
+      final s = 0.45 + rnd.nextDouble() * 0.6;
+      if (!clear(p, 0.25 * s)) continue;
+      if (i % 9 == 0) {
+        rocks.addInstance(
+          vm.Matrix4.translation(p + vm.Vector3(0, 0.1, 0))
+            ..scaleByVector3(vm.Vector3.all(0.14 + rnd.nextDouble() * 0.18)),
         );
         continue;
       }
-      final s = 0.6 + rnd.nextDouble() * 0.6;
-      scene.add(
-        _m(
-          CylinderGeometry(bottomRadius: 0.05, topRadius: 0.04, height: 0.4),
-          trunk,
-          at: p + vm.Vector3(0, 0.2 * s, 0),
-          scale: vm.Vector3.all(s),
-        ),
+      final pick = rnd.nextDouble();
+      final c =
+          canopies[pick < 0.04
+              ? 3
+              : pick < 0.07
+              ? 4
+              : rnd.nextInt(3)];
+      trunks.addInstance(vm.Matrix4.translation(p + vm.Vector3(0, 0.2 * s, 0))..scaleByVector3(vm.Vector3.all(s)));
+      c.addInstance(
+        vm.Matrix4.translation(p + vm.Vector3(0, 0.55 * s, 0))..scaleByVector3(vm.Vector3(0.3, 0.27, 0.3) * s),
       );
+      if (rnd.nextBool()) {
+        final off = vm.Vector3(rnd.nextDouble() - 0.5, 0, rnd.nextDouble() - 0.5).normalized() * 0.2 * s;
+        c.addInstance(
+          vm.Matrix4.translation(p + off + vm.Vector3(0, 0.42 * s, 0))..scaleByVector3(vm.Vector3.all(0.2 * s)),
+        );
+      }
+    }
+    // Big boulders round the rim of the island.
+    for (var i = 0; i < 26; i++) {
+      final a = i / 26 * math.pi * 2 + rnd.nextDouble() * 0.12;
+      final r = 6.05 + rnd.nextDouble() * 0.3;
+      final sz = 0.3 + rnd.nextDouble() * 0.3;
+      rocks.addInstance(
+        vm.Matrix4.translation(vm.Vector3(math.cos(a) * r, -0.05, math.sin(a) * r))
+          ..rotateY(rnd.nextDouble() * 6)
+          ..scaleByVector3(vm.Vector3(sz * 1.3, sz * 0.8, sz)),
+      );
+    }
+    for (final m in [trunks, ...canopies, rocks]) {
+      scene.add(Node()..addComponent(InstancedMeshComponent(m)));
+    }
+
+    // Lamp posts along the paths and round the shore, and lily pads.
+    final pole = _pbr(0.04, 0.04, 0.07, rough: 0.5);
+    final lampGlow = PhysicallyBasedMaterial()
+      ..baseColorFactor = vm.Vector4(1, 0.85, 0.5, 1)
+      ..emissiveFactor = vm.Vector4(5, 3.4, 1.4, 1);
+    final lamps = <vm.Vector3>[];
+    for (final ride in rides) {
+      final end = vm.Vector3(ride.x, 0, ride.z);
+      final side = (end - plaza).normalized().cross(vm.Vector3(0, 1, 0));
+      lamps.add(plaza + (end - plaza) * 0.5 + side * 0.32);
+    }
+    for (var i = 0; i < 12; i++) {
+      final a = i / 12 * math.pi * 2 + 0.2;
+      lamps.add(vm.Vector3(math.cos(a) * 5.9, 0, math.sin(a) * 5.9));
+    }
+    for (final p in lamps) {
+      scene.add(
+        _m(CylinderGeometry(bottomRadius: 0.025, topRadius: 0.02, height: 0.5), pole, at: p + vm.Vector3(0, 0.25, 0)),
+      );
+      scene.add(_m(SphereGeometry(radius: 0.06, segments: 10, rings: 6), lampGlow, at: p + vm.Vector3(0, 0.53, 0)));
+    }
+    // A few warm pools of light on the grass.
+    for (final p in [plaza, lamps[0], lamps[2], lamps[4]]) {
+      scene.add(
+        Node()
+          ..position = p + vm.Vector3(0, 0.7, 0)
+          ..addComponent(PointLightComponent(PointLight(color: vm.Vector3(1, 0.75, 0.5), intensity: 0.7, range: 1.8))),
+      );
+    }
+    final pad = _pbr(0.06, 0.32, 0.12, rough: 0.6);
+    for (var i = 0; i < 22; i++) {
+      final a = rnd.nextDouble() * math.pi * 2, r = 7.2 + rnd.nextDouble() * 5;
       scene.add(
         _m(
-          SphereGeometry(radius: 1, segments: 16, rings: 10),
-          i.isEven ? leaf : leaf2,
-          at: p + vm.Vector3(0, 0.55 * s, 0),
-          scale: vm.Vector3.all(0.3 * s),
+          CylinderGeometry(bottomRadius: 1, topRadius: 1, height: 1, radialSegments: 16),
+          pad,
+          at: vm.Vector3(math.cos(a) * r, -0.34, math.sin(a) * r),
+          scale: vm.Vector3(0.22 + rnd.nextDouble() * 0.15, 0.02, 0.22 + rnd.nextDouble() * 0.15),
         ),
       );
     }
@@ -264,13 +381,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
               rot: vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), math.pi / 2),
             ),
           );
-          g.add(
-            _m(
-              TorusGeometry(radius: 1.1, tubeRadius: 0.05, radialSegments: 48),
-              red,
-              at: vm.Vector3(0.0, 0.3, 0),
-            ),
-          );
+          g.add(_m(TorusGeometry(radius: 1.1, tubeRadius: 0.05, radialSegments: 48), red, at: vm.Vector3(0.0, 0.3, 0)));
           for (var i = 0; i < 6; i++) {
             final a = i / 6 * math.pi * 2;
             g.add(
@@ -282,13 +393,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
             );
           }
           final car = Node();
-          car.add(
-            _m(
-              CuboidGeometry(vm.Vector3(0.16, 0.1, 0.24)),
-              _pbr(0.95, 0.8, 0.2),
-              at: vm.Vector3(1.1, 0.38, 0),
-            ),
-          );
+          car.add(_m(CuboidGeometry(vm.Vector3(0.16, 0.1, 0.24)), _pbr(0.95, 0.8, 0.2), at: vm.Vector3(1.1, 0.38, 0)));
           g.add(car);
           spinners.add((car, 1.6));
           scene.add(g);
@@ -314,11 +419,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
         case 'Star Swing':
           final g = Node()..position = at;
           g.add(
-            _m(
-              CylinderGeometry(bottomRadius: 0.07, topRadius: 0.05, height: 1.5),
-              white,
-              at: vm.Vector3(0, 0.75, 0),
-            ),
+            _m(CylinderGeometry(bottomRadius: 0.07, topRadius: 0.05, height: 1.5), white, at: vm.Vector3(0, 0.75, 0)),
           );
           final top = Node()..position = vm.Vector3(0, 1.5, 0);
           top.add(
@@ -354,11 +455,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
         case 'Moon Drop':
           final g = Node()..position = at;
           g.add(
-            _m(
-              CylinderGeometry(bottomRadius: 0.13, topRadius: 0.1, height: 2.6),
-              white,
-              at: vm.Vector3(0, 1.3, 0),
-            ),
+            _m(CylinderGeometry(bottomRadius: 0.13, topRadius: 0.1, height: 2.6), white, at: vm.Vector3(0, 1.3, 0)),
           );
           g.add(_m(SphereGeometry(radius: 0.22), unlit(2.0, 2.0, 1.7), at: vm.Vector3(0, 2.75, 0)));
           final ring = _m(
@@ -520,6 +617,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
   void _tick(double dt) {
     t += dt;
     camera = _cam();
+    scene.depthOfField.focusDistance = distance;
     _faceTags();
     for (final (n, speed) in spinners) {
       n.rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), t * speed);
@@ -577,7 +675,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
     final best = rides.reduce((a, b) => a.wait <= b.wait ? a : b);
     final shown = heading ?? best;
     return Scaffold(
-      backgroundColor: const Color(0xFF1F5E86),
+      backgroundColor: const Color(0xFF0B1030),
       body: LayoutBuilder(
         builder: (context, c) {
           size = Size(c.maxWidth, c.maxHeight);
@@ -589,7 +687,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [Color(0xFF2A6E96), Color(0xFF1B4E75)],
+                      colors: [Color(0xFF0B1030), Color(0xFF141B45)],
                     ),
                   ),
                 ),
@@ -764,11 +862,7 @@ class _RideTag extends StatelessWidget {
               width: 24,
               height: 24,
               decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF5B8CFF)),
-              child: Icon(
-                selected ? Icons.check_rounded : Icons.near_me_rounded,
-                size: 13,
-                color: Colors.white,
-              ),
+              child: Icon(selected ? Icons.check_rounded : Icons.near_me_rounded, size: 13, color: Colors.white),
             ),
           ],
         ),

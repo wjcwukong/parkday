@@ -8,6 +8,7 @@ import '../lumi/lumi_brain.dart';
 import '../scene/lumi_rig.dart';
 import '../scene/space.dart';
 import '../theme.dart';
+import '../widgets/light_layer.dart';
 import 'game_hud.dart';
 import 'star_catch.dart' show drawStar;
 
@@ -71,7 +72,9 @@ class _SkyLiftGameState extends State<SkyLiftGame> {
 
   Future<void> _build() async {
     await Scene.initializeStaticResources();
-    scene.toneMapping = ToneMappingMode.linear;
+    // Lumi glows over the painted sky: see LumiBrain.glowSettings.
+    scene.environmentSettings = LumiBrain.glowSettings();
+    scene.add(LumiBrain.backdrop());
     final r = await widget.brain.makeRig();
     r.showUmbrella = false;
     r.root.scale = vm.Vector3.all(0.5);
@@ -236,10 +239,13 @@ class _SkyLiftGameState extends State<SkyLiftGame> {
             child: Stack(
               children: [
                 Positioned.fill(child: CustomPaint(painter: _SkyPainter(this, frame, front: false))),
+                Positioned.fill(child: CustomPaint(painter: LumiShadePainter(() => rig, () => space, frame))),
                 if (rig != null)
                   Positioned.fill(
                     child: IgnorePointer(
-                      child: SceneView(scene, camera: space!.camera, onTick: (_, dt) => _tick(dt)),
+                      child: LightLayer(
+                        child: SceneView(scene, camera: space!.camera, onTick: (_, dt) => _tick(dt)),
+                      ),
                     ),
                   ),
                 Positioned.fill(
@@ -365,6 +371,39 @@ class _SkyPainter extends CustomPainter {
       }
     }
 
+    // Lumi's lantern trail while it climbs: a hot streak of light below it
+    if (!front && g.vy > 2) {
+      final k = (g.vy / 42).clamp(0.0, 1.0);
+      final base = Offset(g.x * size.width, g.lumiY + 70);
+      final len = 60 + 170 * k;
+      final rect = Rect.fromLTWH(base.dx - 11, base.dy, 22, len);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(11)),
+        Paint()
+          ..blendMode = BlendMode.plus
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9)
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color.fromRGBO(255, 236, 200, 0.75 * k),
+              Color.fromRGBO(255, 160, 90, 0.35 * k),
+              const Color(0x00FF8A50),
+            ],
+            stops: const [0, 0.35, 1],
+          ).createShader(rect),
+      );
+      canvas.drawCircle(
+        base,
+        26,
+        Paint()
+          ..blendMode = BlendMode.plus
+          ..shader = RadialGradient(
+            colors: [Color.fromRGBO(255, 220, 170, 0.6 * k), const Color(0x00FFB070)],
+          ).createShader(Rect.fromCircle(center: base, radius: 26)),
+      );
+    }
+
     // clouds: alternate layers behind and in front of Lumi
     final band0 = ((g.alt - size.height / _ppm) / 40).floor() - 1;
     final band1 = ((g.alt + size.height / _ppm) / 40).ceil() + 1;
@@ -379,10 +418,10 @@ class _SkyPainter extends CustomPainter {
         final y = g.screenYFor(ca) + (front ? 0 : 0);
         final drift = math.sin(g.t * 0.3 + b) * 14;
         final col = Color.lerp(
-          const Color(0xFFFFF1F6),
+          const Color(0xFFF7DDEE),
           const Color(0xFFB79AE0),
           f,
-        )!.withValues(alpha: front ? 0.92 : 0.8);
+        )!.withValues(alpha: front ? 0.94 : 1.0);
         _cloud(canvas, Offset(cx + drift, y), scale * (front ? 1.25 : 1), col);
       }
     }
@@ -490,26 +529,38 @@ class _SkyPainter extends CustomPainter {
     }
   }
 
+  /// A cumulus: a heap of puffs, each lit from the upper left and shaded
+  /// lilac underneath, on a flat, darker base, so it reads as a soft 3D
+  /// lump like the original's clouds rather than a flat cut-out.
   void _cloud(Canvas canvas, Offset c, double s, Color col) {
-    final p = Paint()..color = col;
-    final shade = Paint()..color = Color.lerp(col, const Color(0xFFC59AD8), 0.35)!;
-    for (final (dx, dy, r) in const [
-      (-46.0, 10.0, 24.0),
-      (-18.0, -6.0, 32.0),
-      (18.0, -12.0, 36.0),
-      (52.0, 6.0, 26.0),
-      (0.0, 14.0, 30.0),
-    ]) {
-      canvas.drawCircle(c + Offset(dx, dy + 6) * s, r * s, shade);
-    }
-    for (final (dx, dy, r) in const [
-      (-46.0, 10.0, 24.0),
-      (-18.0, -6.0, 32.0),
-      (18.0, -12.0, 36.0),
-      (52.0, 6.0, 26.0),
-      (0.0, 14.0, 30.0),
-    ]) {
-      canvas.drawCircle(c + Offset(dx, dy) * s, r * s, p);
+    final shadow = Color.lerp(col, const Color(0xFF9C7CC4), 0.5)!;
+    final light = Color.lerp(col, Colors.white, 0.5)!;
+    const puffs = [
+      (-58.0, 14.0, 22.0),
+      (58.0, 12.0, 24.0),
+      (-30.0, 8.0, 30.0),
+      (30.0, 4.0, 32.0),
+      (-12.0, -14.0, 34.0),
+      (20.0, -22.0, 30.0),
+      (0.0, 16.0, 30.0),
+    ];
+    // the flat underside in shadow
+    final base = Rect.fromCenter(center: c + Offset(0, 26) * s, width: 150 * s, height: 30 * s);
+    canvas.drawOval(base, Paint()..color = shadow.withValues(alpha: shadow.a * 0.9));
+    for (final (dx, dy, r) in puffs) {
+      final pc = c + Offset(dx, dy) * s;
+      final rect = Rect.fromCircle(center: pc, radius: r * s);
+      canvas.drawCircle(
+        pc,
+        r * s,
+        Paint()
+          ..shader = RadialGradient(
+            center: const Alignment(-0.35, -0.5),
+            radius: 1.1,
+            colors: [light, col, shadow],
+            stops: const [0, 0.45, 1],
+          ).createShader(rect),
+      );
     }
   }
 

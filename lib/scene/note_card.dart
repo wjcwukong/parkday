@@ -43,14 +43,27 @@ class NoteCard {
   static Future<ui.Image> _paint(String title, String body, IconData icon, double scale) async {
     final rec = ui.PictureRecorder();
     final c = Canvas(rec)..scale(scale);
+    paintFace(c, title, body, icon);
+    final picture = rec.endRecording();
+    final image = await picture.toImage((size.width * scale).round(), (size.height * scale).round());
+    picture.dispose();
+    return image;
+  }
+
+  /// Paints the card's face into [c] at [size]. [dark] is the solid card
+  /// shown in front of Lumi; the light one glows inside the glass head,
+  /// where the scene is screen-blended and a dark card would vanish.
+  static void paintFace(Canvas c, String title, String body, IconData icon, {bool dark = false}) {
     final r = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(10));
     c.drawRRect(
       r,
       Paint()
-        ..shader = const LinearGradient(
+        ..shader = LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xF2323A72), Color(0xF21E2350)],
+          colors: dark
+              ? const [Color(0xF5191C38), Color(0xF50C0E22)]
+              : const [Color(0xF2323A72), Color(0xF21E2350)],
         ).createShader(Offset.zero & size),
     );
     c.drawRRect(
@@ -58,7 +71,7 @@ class NoteCard {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1
-        ..color = const Color(0x40FFFFFF),
+        ..color = dark ? const Color(0x30FFFFFF) : const Color(0x40FFFFFF),
     );
     TextPainter(
         text: TextSpan(
@@ -90,9 +103,5 @@ class NoteCard {
       )
       ..layout(maxWidth: size.width - 38)
       ..paint(c, const Offset(28, 22));
-    final picture = rec.endRecording();
-    final image = await picture.toImage((size.width * scale).round(), (size.height * scale).round());
-    picture.dispose();
-    return image;
   }
 }

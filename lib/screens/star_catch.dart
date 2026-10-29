@@ -8,6 +8,7 @@ import '../lumi/lumi_brain.dart';
 import '../scene/lumi_rig.dart';
 import '../scene/space.dart';
 import '../theme.dart';
+import '../widgets/light_layer.dart';
 import 'game_hud.dart';
 
 class _Star {
@@ -45,7 +46,6 @@ class _StarCatchGameState extends State<StarCatchGame> {
   final frame = ValueNotifier(0);
   final rnd = math.Random();
   LumiRig? rig;
-  Node? pad;
   ScreenSpace? space;
   Size size = Size.zero;
 
@@ -62,6 +62,7 @@ class _StarCatchGameState extends State<StarCatchGame> {
   final stars = <_Star>[];
   final sky = <Offset>[]; // constellation of caught stars
   final popups = <_Popup>[];
+  final flashes = <_Popup>[]; // catch flashes: where and how old
 
   int get multiplier => 1 + streak ~/ 5;
 
@@ -73,27 +74,13 @@ class _StarCatchGameState extends State<StarCatchGame> {
 
   Future<void> _build() async {
     await Scene.initializeStaticResources();
-    scene.toneMapping = ToneMappingMode.linear;
+    // Lumi glows over the painted lake: see LumiBrain.glowSettings.
+    scene.environmentSettings = LumiBrain.glowSettings();
+    scene.add(LumiBrain.backdrop());
     final r = await widget.brain.makeRig();
     r.showUmbrella = false;
     r.root.scale = vm.Vector3.all(0.55);
     scene.add(r.root);
-    final p = Node(
-      mesh: Mesh(
-        CylinderGeometry(bottomRadius: 0.62, topRadius: 0.66, height: 0.06, radialSegments: 32),
-        unlit(0.12, 0.6, 0.22),
-      ),
-    );
-    p.add(
-      Node(
-        mesh: Mesh(
-          CylinderGeometry(bottomRadius: 0.5, topRadius: 0.5, height: 0.07, radialSegments: 32),
-          unlit(0.25, 0.85, 0.35),
-        ),
-      ),
-    );
-    scene.add(p);
-    pad = p;
     if (mounted) setState(() => rig = r);
   }
 
@@ -168,6 +155,7 @@ class _StarCatchGameState extends State<StarCatchGame> {
         );
         st.to = to;
         popups.add(_Popup('+$gain', st.pos));
+        flashes.add(_Popup('', st.pos));
         if (streak % 5 == 0) {
           popups.add(
             _Popup(
@@ -198,6 +186,10 @@ class _StarCatchGameState extends State<StarCatchGame> {
       p.age += dt;
     }
     popups.removeWhere((p) => p.age > (p.big ? 1.6 : 0.9));
+    for (final f in flashes) {
+      f.age += dt;
+    }
+    flashes.removeWhere((f) => f.age > 0.5);
 
     // place Lumi on the lily pad
     final world = s.toWorld(Offset(lumiX, size.height * 0.74));
@@ -216,8 +208,6 @@ class _StarCatchGameState extends State<StarCatchGame> {
       r.gaze = vm.Vector2((d.dx / 200).clamp(-1, 1), (d.dy / 250).clamp(-1, 1));
     }
     r.update(dt);
-    pad!.position = world + vm.Vector3(0, -0.82, 0.05);
-    pad!.rotation = vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), -0.32);
     frame.value++;
   }
 
@@ -232,6 +222,7 @@ class _StarCatchGameState extends State<StarCatchGame> {
       stars.clear();
       sky.clear();
       popups.clear();
+      flashes.clear();
     });
   }
 
@@ -258,10 +249,13 @@ class _StarCatchGameState extends State<StarCatchGame> {
             child: Stack(
               children: [
                 Positioned.fill(child: CustomPaint(painter: _LakePainter(this, frame))),
+                Positioned.fill(child: CustomPaint(painter: LumiShadePainter(() => rig, () => space, frame))),
                 if (rig != null)
                   Positioned.fill(
                     child: IgnorePointer(
-                      child: SceneView(scene, camera: space!.camera, onTick: (_, dt) => _tick(dt)),
+                      child: LightLayer(
+                        child: SceneView(scene, camera: space!.camera, onTick: (_, dt) => _tick(dt)),
+                      ),
                     ),
                   ),
                 Positioned.fill(
@@ -370,6 +364,62 @@ class _LakePainter extends CustomPainter {
       final x = (rnd.nextDouble() * size.width + tw * (10 + i)) % size.width;
       canvas.drawLine(Offset(x, y), Offset(x + 18 + i * 1.5, y), rip);
     }
+    // the hills mirrored in the still water, fading with depth
+    canvas.save();
+    canvas.translate(0, 2 * wy);
+    canvas.scale(1, -1);
+    canvas.drawPath(
+      hills,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: const [Color(0xCC1E1440), Color(0x001E1440)],
+        ).createShader(Rect.fromLTRB(0, wy - 70, size.width, wy)),
+    );
+    canvas.restore();
+    // Lumi's lily pad, and Lumi's light smeared down the water under it
+    final px = g.lumiX == 0 ? size.width / 2 : g.lumiX;
+    final pad = Offset(px, size.height * 0.74 + 92);
+    final glow = Paint()..blendMode = BlendMode.plus;
+    final smear = Rect.fromCenter(center: pad + const Offset(0, 62), width: 46, height: 110);
+    canvas.drawOval(
+      smear,
+      glow
+        ..shader = const RadialGradient(
+          colors: [Color(0x665EA8FF), Color(0x225EA8FF), Color(0x005EA8FF)],
+        ).createShader(smear),
+    );
+    for (var i = 0; i < 5; i++) {
+      final y = pad.dy + 22 + i * 13.0;
+      final w = 30 - i * 3 + math.sin(tw * 3 + i) * 4;
+      canvas.drawLine(
+        Offset(px - w / 2, y),
+        Offset(px + w / 2, y),
+        Paint()
+          ..color = Color.fromRGBO(140, 200, 255, 0.35 - i * 0.05)
+          ..strokeWidth = 3
+          ..blendMode = BlendMode.plus,
+      );
+    }
+    canvas.drawCircle(
+      pad + const Offset(0, 74),
+      5,
+      Paint()
+        ..color = const Color(0x88FF9A50)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+    );
+    final padRect = Rect.fromCenter(center: pad, width: 86, height: 18);
+    canvas.drawOval(padRect.shift(const Offset(0, 3)), Paint()..color = const Color(0xFF123A26));
+    canvas.drawOval(
+      padRect,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF5FC48A), Color(0xFF2E8A55)],
+        ).createShader(padRect),
+    );
     // reflection of the constellation
     final refl = Paint()..color = const Color(0x33FFE08A);
     for (final s in g.sky) {
@@ -397,22 +447,71 @@ class _StarsPainter extends CustomPainter {
     for (final s in g.sky) {
       drawStar(canvas, s, 5, const Color(0xFFFFE08A));
     }
+    final add = Paint()..blendMode = BlendMode.plus;
     for (final st in g.stars) {
-      // falling trail
+      // a long thin falling trail, brightest at the star
       if (!st.caught) {
+        const len = 110.0;
         canvas.drawLine(
-          st.pos - const Offset(0, 26),
+          st.pos - const Offset(0, len),
           st.pos,
           Paint()
             ..shader = LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [const Color(0x00FFE08A), const Color(0x99FFE08A)],
-            ).createShader(Rect.fromPoints(st.pos - const Offset(1, 26), st.pos))
-            ..strokeWidth = 2,
+              colors: [const Color(0x00FFE7A0), const Color(0xAAFFE7A0)],
+            ).createShader(Rect.fromPoints(st.pos - const Offset(1, len), st.pos))
+            ..strokeWidth = 1.3
+            ..blendMode = BlendMode.plus,
         );
       }
-      drawStar(canvas, st.pos, st.caught ? 8 : 11, const Color(0xFFFFE08A));
+      final r = st.caught ? 8.0 : 13.0;
+      canvas.drawCircle(
+        st.pos,
+        r * 2.6,
+        add
+          ..shader = RadialGradient(
+            colors: const [Color(0x88FFD98A), Color(0x22FFB84D), Color(0x00FFB84D)],
+          ).createShader(Rect.fromCircle(center: st.pos, radius: r * 2.6)),
+      );
+      add.shader = null;
+      drawStar(canvas, st.pos, r, const Color(0xFFFFE6A0));
+    }
+    // catch flashes: a white-hot burst with a four-point glint and a ring
+    for (final f in g.flashes) {
+      final k = f.age / 0.5;
+      final a = (1 - k).clamp(0.0, 1.0);
+      final rr = 18 + k * 50;
+      canvas.drawCircle(
+        f.pos,
+        rr,
+        add
+          ..shader = RadialGradient(
+            colors: [
+              Color.fromRGBO(255, 250, 230, 0.9 * a),
+              Color.fromRGBO(255, 210, 120, 0.35 * a),
+              const Color(0x00FFD278),
+            ],
+          ).createShader(Rect.fromCircle(center: f.pos, radius: rr)),
+      );
+      add.shader = null;
+      final glint = Paint()
+        ..color = Color.fromRGBO(255, 245, 220, 0.8 * a)
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.round
+        ..blendMode = BlendMode.plus;
+      final l = 30 + k * 40;
+      canvas.drawLine(f.pos - Offset(l, 0), f.pos + Offset(l, 0), glint);
+      canvas.drawLine(f.pos - Offset(0, l * 0.6), f.pos + Offset(0, l * 0.6), glint);
+      canvas.drawCircle(
+        f.pos,
+        12 + k * 34,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.5 * a
+          ..color = Color.fromRGBO(255, 220, 150, 0.7 * a)
+          ..blendMode = BlendMode.plus,
+      );
     }
     for (final p in g.popups) {
       final f = p.age / (p.big ? 1.6 : 0.9);

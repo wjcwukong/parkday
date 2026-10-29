@@ -25,6 +25,11 @@ class ParkNote {
   double age = 0;
   Offset pos = Offset.zero; // where the card shows on screen
   NoteCard? card;
+  double opacity = 0;
+
+  /// How much the card is drawn as the solid card in front of Lumi (1)
+  /// rather than the glowing one inside the glass head (0).
+  double front = 1;
   bool _loading = false;
   bool eaten = false;
   bool done = false;
@@ -132,7 +137,7 @@ class LumiBrain extends ChangeNotifier {
   /// Tips the page back and lets Lumi glide down over the feed, lighting
   /// up the cards it passes, then sets everything back.
   void flyover() {
-    if (flying || asleep || away || space == null) return;
+    if (flying || asleep || away || space == null || notes.isNotEmpty) return;
     _flyT = 0;
     _setStatus('Lumi is exploring the page', 999);
     notifyListeners();
@@ -184,15 +189,8 @@ class LumiBrain extends ChangeNotifier {
     // Lumi is light: an HDR look with bloom, rendered over an opaque black
     // backdrop and screen-blended onto the UI (see LightLayer), so the glow
     // spills past Lumi's silhouette instead of being cut off by alpha.
-    scene.environmentSettings = EnvironmentSettings(
-      toneMapping: ToneMappingMode.pbrNeutral,
-      exposure: 1.0,
-      bloomEnabled: true,
-      bloomThreshold: 0.9,
-      bloomIntensity: 0.3,
-      bloomScatter: 0.62,
-    );
-    scene.add(_backdrop());
+    scene.environmentSettings = glowSettings();
+    scene.add(backdrop());
     // Compile the spark material up front so the first burst is instant.
     await loadFmatMaterial('assets/materials/sparks.fmat');
     fx = HomeFx(scene);
@@ -205,10 +203,21 @@ class LumiBrain extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The look for a scene of Lumi drawn as light over Flutter widgets: HDR
+  /// with bloom. Pair it with [backdrop] and a `LightLayer`.
+  static EnvironmentSettings glowSettings() => EnvironmentSettings(
+    toneMapping: ToneMappingMode.pbrNeutral,
+    exposure: 1.0,
+    bloomEnabled: true,
+    bloomThreshold: 0.9,
+    bloomIntensity: 0.3,
+    bloomScatter: 0.62,
+  );
+
   /// A black card far behind Lumi that keeps the scene opaque, so bloom
   /// survives the resolve (it is multiplied by coverage) and screen blending
   /// makes the black disappear.
-  static Node _backdrop() {
+  static Node backdrop() {
     final mat = UnlitMaterial()
       ..baseColorFactor = vm.Vector4(0, 0, 0, 1)
       ..doubleSided = true;
@@ -877,6 +886,7 @@ class LumiBrain extends ChangeNotifier {
 
     var pose = rest;
     var opacity = 1.0;
+    var front = 1.0;
     final g = n.age;
     if (asleep || away) {
       // Nobody to eat it: it drifts past and fades.
@@ -910,13 +920,17 @@ class LumiBrain extends ChangeNotifier {
       final t = (g - arrive - hold - tip) / gulp;
       pose = lerp(mouth, inside, Curves.easeInCubic.transform(t));
       _eatT = 1.3;
+      // Past the lips it is behind the glass: hand over to the glowing card.
+      front = 1 - (t / 0.35).clamp(0.0, 1.0);
     } else if (g < arrive + hold + tip + gulp + digest) {
       // Inside the head: it tumbles and dissolves.
       final t = (g - arrive - hold - tip - gulp) / digest;
+      front = 0;
       pose = (inside.$1, inside.$2, inside.$3 + t * 1.4, inside.$4, inside.$5 + t * 0.8, inside.$6 * (1 - t));
       opacity = 1 - t * t;
     } else {
       n.done = true;
+      front = opacity = 0;
       _eatT = 1.3;
       rig?.squashY = 1.15;
       Future.delayed(const Duration(milliseconds: 160), () => rig?.squashY = 0.92);
@@ -934,7 +948,9 @@ class LumiBrain extends ChangeNotifier {
           vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), -pitch) *
           vm.Quaternion.axisAngle(vm.Vector3(0, 0, 1), roll)
       ..scale = vm.Vector3.all(math.max(0.001, size * _scale));
-    card.opacity = opacity;
+    n.opacity = opacity;
+    n.front = front;
+    card.opacity = opacity * (1 - front);
     if (n.done) card.node.detach();
   }
 

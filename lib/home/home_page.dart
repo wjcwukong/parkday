@@ -6,6 +6,7 @@ import 'package:flutter_scene/scene.dart';
 
 import '../lumi/lumi_brain.dart';
 import '../scene/lumi_rig.dart';
+import '../scene/note_card.dart';
 import '../screens/fireworks_show.dart';
 import '../screens/lumi_room.dart';
 import '../screens/park_map.dart';
@@ -307,6 +308,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     ),
                   ),
                 ),
+              if (brain.ready && !paused) Positioned.fill(child: IgnorePointer(child: _NoteOverlay(brain: brain))),
               Positioned.fill(
                 child: IgnorePointer(child: CustomPaint(painter: LumiAuraPainter(brain, front: true))),
               ),
@@ -752,6 +754,66 @@ class _Slab extends StatelessWidget {
       },
     );
   }
+}
+
+/// The solid note cards Lumi holds in front of itself. The home scene is
+/// screen-blended onto the page, so a dark card in it would vanish; this
+/// draws the card as a widget on top instead, in the same perspective as
+/// the scene's card (the camera's projection times the card's world
+/// transform), and the scene's glowing card takes over once it is past
+/// Lumi's lips.
+class _NoteOverlay extends StatelessWidget {
+  const _NoteOverlay({required this.brain});
+  final LumiBrain brain;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: brain.frame,
+      builder: (context, _, _) {
+        final sp = brain.space;
+        if (sp == null) return const SizedBox.shrink();
+        final cards = <Widget>[];
+        for (final n in brain.notes) {
+          final card = n.card;
+          final k = n.opacity * n.front;
+          if (card == null || n.done || k <= 0.01) continue;
+          final size = NoteCard.size;
+          final m = Matrix4.identity()
+            ..setEntry(3, 2, 1 / (sp.distance * sp.ppu))
+            ..multiply(Matrix4.diagonal3Values(sp.ppu, -sp.ppu, sp.ppu))
+            ..multiply(Matrix4.fromList(card.node.globalTransform.storage))
+            ..multiply(Matrix4.diagonal3Values(0.01, -0.01, 1))
+            ..translateByDouble(-size.width / 2, -size.height / 2, 0, 1);
+          cards.add(
+            Positioned(
+              left: sp.size.width / 2,
+              top: sp.size.height / 2,
+              child: Transform(
+                transform: m,
+                child: Opacity(
+                  opacity: k.clamp(0.0, 1.0),
+                  child: CustomPaint(size: size, painter: _NoteFacePainter(n)),
+                ),
+              ),
+            ),
+          );
+        }
+        return Stack(clipBehavior: Clip.none, children: cards);
+      },
+    );
+  }
+}
+
+class _NoteFacePainter extends CustomPainter {
+  _NoteFacePainter(this.note);
+  final ParkNote note;
+
+  @override
+  void paint(Canvas canvas, Size size) => NoteCard.paintFace(canvas, note.title, note.body, note.icon, dark: true);
+
+  @override
+  bool shouldRepaint(_NoteFacePainter old) => old.note != note;
 }
 
 /// The pool of light Lumi casts on the cards while it glides over them.
