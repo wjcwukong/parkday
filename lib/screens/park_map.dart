@@ -123,6 +123,7 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
   final selected = ValueNotifier<Ride?>(null);
   static const _tagSize = Size(120, 50), _tagHeight = 0.74;
   Node? dropRing;
+  (Node, List<vm.Vector3>)? coaster; // the Sky Coaster car and its track
 
   // Lumi hopping
   vm.Vector3 lumiFrom = _start.clone();
@@ -498,30 +499,53 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
       final at = vm.Vector3(ride.x, 0.05, ride.z);
       switch (ride.name) {
         case 'Sky Coaster':
+          // A hilly circuit of red track on white trestles round a vertical
+          // loop, with a car running the circuit.
           final g = Node()..position = at;
           g.add(
             _m(
-              TorusGeometry(radius: 0.65, tubeRadius: 0.05, radialSegments: 40),
+              TorusGeometry(radius: 0.55, tubeRadius: 0.045, radialSegments: 40),
               red,
-              at: vm.Vector3(0, 0.85, 0),
+              at: vm.Vector3(0, 0.75, 0),
               rot: vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), math.pi / 2),
             ),
           );
-          g.add(_m(TorusGeometry(radius: 1.1, tubeRadius: 0.05, radialSegments: 48), red, at: vm.Vector3(0.0, 0.3, 0)));
-          for (var i = 0; i < 6; i++) {
-            final a = i / 6 * math.pi * 2;
-            g.add(
-              _m(
-                CylinderGeometry(bottomRadius: 0.025, topRadius: 0.025, height: 0.3),
-                white,
-                at: vm.Vector3(math.cos(a) * 1.1, 0.15, math.sin(a) * 1.1),
-              ),
-            );
+          final pts = <vm.Vector3>[];
+          const n = 96;
+          for (var i = 0; i < n; i++) {
+            final a = i / n * math.pi * 2;
+            final r = 1.05 + 0.14 * math.sin(a * 3);
+            final y = 0.28 + 0.55 * math.pow(math.max(0.0, math.sin(a * 2 + 0.6)), 2);
+            pts.add(vm.Vector3(math.cos(a) * r, y, math.sin(a) * r));
           }
+          final rod = CylinderGeometry(bottomRadius: 1, topRadius: 1, height: 1, radialSegments: 8);
+          final rails = InstancedMesh(geometry: rod, material: red);
+          final legs = InstancedMesh(geometry: rod, material: white);
+          final up = vm.Vector3(0, 1, 0);
+          for (var i = 0; i < n; i++) {
+            final p = pts[i], q = pts[(i + 1) % n];
+            final d = q - p;
+            final turn = vm.Quaternion.fromTwoVectors(up, d.normalized());
+            final side = d.cross(up).normalized() * 0.05;
+            for (final o in [side, -side]) {
+              rails.addInstance(vm.Matrix4.compose((p + q) * 0.5 + o, turn, vm.Vector3(0.02, d.length * 1.1, 0.02)));
+            }
+            if (i % 6 == 0) {
+              legs.addInstance(
+                vm.Matrix4.compose(
+                  vm.Vector3(p.x, p.y / 2, p.z),
+                  vm.Quaternion.identity(),
+                  vm.Vector3(0.018, p.y, 0.018),
+                ),
+              );
+            }
+          }
+          g.add(Node()..addComponent(InstancedMeshComponent(rails)));
+          g.add(Node()..addComponent(InstancedMeshComponent(legs)));
           final car = Node();
-          car.add(_m(CuboidGeometry(vm.Vector3(0.16, 0.1, 0.24)), _pbr(0.95, 0.8, 0.2), at: vm.Vector3(1.1, 0.38, 0)));
+          car.add(_m(CuboidGeometry(vm.Vector3(0.14, 0.1, 0.26)), _pbr(0.95, 0.8, 0.2), at: vm.Vector3(0, 0.07, 0)));
           g.add(car);
-          spinners.add((car, 1.6));
+          coaster = (car, pts);
           scene.add(g);
         case 'River Run':
           scene.add(
@@ -542,6 +566,17 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
           );
           scene.add(boat);
           spinners.add((boat, -0.9));
+          // Boulders on the island inside the channel.
+          for (final (dx, dz, sz) in [(-0.1, 0.05, 0.3), (0.2, -0.12, 0.22), (0.05, 0.25, 0.18)]) {
+            scene.add(
+              _m(
+                IcosphereGeometry(radius: 1, subdivisions: 1),
+                _pbr(0.5, 0.45, 0.52),
+                at: at + vm.Vector3(dx, sz * 0.5, dz),
+                scale: vm.Vector3(sz * 1.2, sz, sz),
+              ),
+            );
+          }
         case 'Star Swing':
           final g = Node()..position = at;
           g.add(
@@ -579,13 +614,49 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
           spinners.add((top, 1.4));
           scene.add(g);
         case 'Moon Drop':
+          // A candy-striped lighthouse: tapering red and white bands, a
+          // gallery, a glowing lamp room and a pointed roof. The drop ring
+          // rides up and down the tower.
           final g = Node()..position = at;
+          const bands = 7, tower = 2.4;
+          for (var i = 0; i < bands; i++) {
+            final h = tower / bands;
+            g.add(
+              _m(
+                CylinderGeometry(
+                  bottomRadius: 0.3 - 0.12 * i / bands,
+                  topRadius: 0.3 - 0.12 * (i + 1) / bands,
+                  height: h,
+                  radialSegments: 24,
+                ),
+                i.isEven ? red : white,
+                at: vm.Vector3(0, h * (i + 0.5), 0),
+              ),
+            );
+          }
           g.add(
-            _m(CylinderGeometry(bottomRadius: 0.13, topRadius: 0.1, height: 2.6), white, at: vm.Vector3(0, 1.3, 0)),
+            _m(
+              CylinderGeometry(bottomRadius: 0.27, topRadius: 0.27, height: 0.05, radialSegments: 24),
+              white,
+              at: vm.Vector3(0, tower + 0.025, 0),
+            ),
           );
-          g.add(_m(SphereGeometry(radius: 0.22), unlit(2.0, 2.0, 1.7), at: vm.Vector3(0, 2.75, 0)));
+          g.add(
+            _m(
+              CylinderGeometry(bottomRadius: 0.15, topRadius: 0.15, height: 0.26, radialSegments: 20),
+              unlit(2.2, 1.9, 1.3),
+              at: vm.Vector3(0, tower + 0.18, 0),
+            ),
+          );
+          g.add(
+            _m(
+              CylinderGeometry(bottomRadius: 0.21, topRadius: 0.01, height: 0.24, radialSegments: 20),
+              red,
+              at: vm.Vector3(0, tower + 0.43, 0),
+            ),
+          );
           final ring = _m(
-            TorusGeometry(radius: 0.22, tubeRadius: 0.07, radialSegments: 24),
+            TorusGeometry(radius: 0.38, tubeRadius: 0.07, radialSegments: 28),
             _pbr(0.45, 0.4, 0.95),
             at: vm.Vector3(0, 0.5, 0),
           );
@@ -593,27 +664,63 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
           dropRing = ring;
           scene.add(g);
         case 'Tidal Twist':
+          // Teacups: a striped turntable turning round a domed hub, each cup
+          // on its saucer spinning the other way.
           final g = Node()..position = at;
           g.add(
+            Node(
+              mesh: Mesh(
+                stripedCone(0.85, 0.05, 12, vm.Vector4(0.36, 0.56, 0.95, 1), vm.Vector4(0.95, 0.96, 1, 1)),
+                _pbr(1, 1, 1, rough: 0.6),
+              ),
+            )..position = vm.Vector3(0, 0.04, 0),
+          );
+          g.add(
             _m(
-              CylinderGeometry(bottomRadius: 0.75, topRadius: 0.75, height: 0.08, radialSegments: 32),
-              _pbr(0.2, 0.7, 0.75),
-              at: vm.Vector3(0, 0.04, 0),
+              CylinderGeometry(bottomRadius: 0.12, topRadius: 0.1, height: 0.3, radialSegments: 16),
+              white,
+              at: vm.Vector3(0, 0.2, 0),
             ),
           );
-          final spin = Node();
-          for (var i = 0; i < 4; i++) {
-            final a = i / 4 * math.pi * 2;
-            spin.add(
+          g.add(
+            _m(
+              SphereGeometry(radius: 0.16),
+              _pbr(0.3, 0.75, 0.8),
+              at: vm.Vector3(0, 0.36, 0),
+              scale: vm.Vector3(1, 0.7, 1),
+            ),
+          );
+          final table = Node();
+          final cups = [
+            _pbr(0.98, 0.5, 0.62),
+            _pbr(0.62, 0.45, 0.95),
+            _pbr(0.98, 0.82, 0.35),
+            _pbr(0.3, 0.78, 0.75),
+            _pbr(0.98, 0.6, 0.4),
+          ];
+          for (var i = 0; i < cups.length; i++) {
+            final a = i / cups.length * math.pi * 2;
+            final cup = Node()..position = vm.Vector3(math.cos(a) * 0.52, 0.08, math.sin(a) * 0.52);
+            cup.add(_m(CylinderGeometry(bottomRadius: 0.19, topRadius: 0.19, height: 0.03, radialSegments: 20), white));
+            cup.add(
               _m(
-                CylinderGeometry(bottomRadius: 0.13, topRadius: 0.18, height: 0.2, radialSegments: 18),
-                i.isEven ? _pbr(0.98, 0.5, 0.6) : _pbr(0.98, 0.85, 0.4),
-                at: vm.Vector3(math.cos(a) * 0.45, 0.18, math.sin(a) * 0.45),
+                CylinderGeometry(bottomRadius: 0.1, topRadius: 0.16, height: 0.17, radialSegments: 20),
+                cups[i],
+                at: vm.Vector3(0, 0.1, 0),
               ),
             );
+            cup.add(
+              _m(
+                TorusGeometry(radius: 0.16, tubeRadius: 0.015, radialSegments: 24),
+                white,
+                at: vm.Vector3(0, 0.185, 0),
+              ),
+            );
+            table.add(cup);
+            spinners.add((cup, -2.6 - i * 0.4));
           }
-          g.add(spin);
-          spinners.add((spin, 2.2));
+          g.add(table);
+          spinners.add((table, 1.1));
           scene.add(g);
         case 'Comet Carousel':
           final g = Node()..position = at;
@@ -762,6 +869,15 @@ class _ParkMapScreenState extends State<ParkMapScreen> {
     _faceTags();
     for (final (n, speed) in spinners) {
       n.rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), t * speed);
+    }
+    if (coaster case (final car, final track)) {
+      final u = (t * 0.1 % 1) * track.length;
+      final i = u.floor();
+      final p = track[i], q = track[(i + 1) % track.length];
+      final d = q - p;
+      car
+        ..position = p + d * (u - i)
+        ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), math.atan2(d.x, d.z));
     }
     final ring = dropRing;
     if (ring != null) {
