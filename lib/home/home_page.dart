@@ -744,8 +744,9 @@ class _Slab extends StatelessWidget {
   final Widget child;
   final double radius;
 
-  // How thick the slab stands, and how far Lumi's landing pushes it in.
-  static const _depth = 16.0, _dip = 9.0, _layers = 5;
+  // How far Lumi's landing pushes the slab in, and how many stacked
+  // outlines draw its sides.
+  static const _dip = 9.0, _layers = 14;
 
   @override
   Widget build(BuildContext context) {
@@ -753,35 +754,46 @@ class _Slab extends StatelessWidget {
       valueListenable: brain.frame,
       child: child,
       builder: (context, _, child) {
-        final k = brain.tiltAmount;
+        // The cards rise one after another down the feed, so the page
+        // opens up into layers rather than lifting as one sheet.
+        final k = Curves.easeOutCubic.transform((brain.tiltAmount * 1.5 - index * 0.06).clamp(0.0, 1.0));
         final press = brain.cardPress[index] ?? 0;
+        final depth = LumiBrain.slabHeight(index) * k;
         final r = BorderRadius.circular(radius);
         Matrix4 up(double z) => Matrix4.translationValues(0, 0, -z);
         return Stack(
           clipBehavior: Clip.none,
           children: [
             if (k > 0) ...[
+              // A soft shadow cast down onto the page, further off the
+              // higher the card stands.
               Positioned.fill(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     borderRadius: r,
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.55 * k),
-                        blurRadius: 16,
-                        offset: Offset(0, 8 * k),
+                        color: Colors.black.withValues(alpha: 0.7 * k),
+                        blurRadius: 10 + 18 * k,
+                        spreadRadius: 2 * k,
+                        offset: Offset(0, 22 * k),
                       ),
                     ],
                   ),
                 ),
               ),
+              // The sides: dark, a little lighter towards the top.
               for (var i = 0; i < _layers; i++)
                 Positioned.fill(
                   child: Transform(
-                    transform: up(_depth * k * i / _layers),
+                    transform: up(depth * i / _layers),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: Color.lerp(const Color(0xFF07081A), const Color(0xFF181C3E), i / _layers),
+                        color: Color.lerp(
+                          const Color(0xFF03040C),
+                          const Color(0xFF1A1F48),
+                          math.pow(i / (_layers - 1), 1.6).toDouble(),
+                        ),
                         borderRadius: r,
                       ),
                     ),
@@ -791,7 +803,7 @@ class _Slab extends StatelessWidget {
             // The card on top dips and lights up where Lumi lands on it.
             Transform(
               key: const ValueKey('card'),
-              transform: up((_depth - _dip * press) * k),
+              transform: up(depth - _dip * press * k),
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   borderRadius: r,
@@ -804,7 +816,12 @@ class _Slab extends StatelessWidget {
                   position: DecorationPosition.foreground,
                   decoration: BoxDecoration(
                     borderRadius: r,
-                    border: Border.all(color: const Color(0xFFBFE0FF).withValues(alpha: 0.85 * press * k), width: 1.5),
+                    // A lit rim picks the raised card out from the ones
+                    // below it; it brightens where Lumi lands.
+                    border: Border.all(
+                      color: const Color(0xFFBFE0FF).withValues(alpha: (0.22 + 0.63 * press) * k),
+                      width: 1.5,
+                    ),
                   ),
                   child: child,
                 ),

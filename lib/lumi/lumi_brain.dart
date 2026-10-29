@@ -119,7 +119,7 @@ class LumiBrain extends ChangeNotifier {
 
   /// The page's turn about its vertical axis, and how far it is lifted up
   /// the screen and pulled towards the viewer (logical pixels) while
-  /// tilted. Fitted to the original's frames: about 37 degrees, with the
+  /// tilted. Fitted to the original's frames: about 47 degrees, with the
   /// page brought up and in so the header stays near the top.
   double pageYaw = 0, pageLift = 0, pagePush = 0;
   double _flyT = -1;
@@ -144,7 +144,13 @@ class LumiBrain extends ChangeNotifier {
   double _hopLift = 0, _hopLean = 0;
   double _hopUp = 0; // how high Lumi is in its hop, in world units up the screen
   double _feetZ = 0; // off the page, in world units (-Z)
-  static const _crouch = 0.16, _land = 0.2, _dwell = 0.3, _slab = 0.16;
+  static const _crouch = 0.16, _land = 0.2, _dwell = 0.3;
+
+  /// How high a feed card stands off the tipped-back page, in logical
+  /// pixels, by its place in the feed. They step down the page like
+  /// stairs, so each card's front edge shows above the next one and the
+  /// page reads as layers; Lumi hops down the steps.
+  static double slabHeight(int index) => math.max(20, 78 - index * 11.0);
 
   /// How far into the fly-over tilt the page is, 0 (flat) to 1.
   double get tiltAmount => (pageTilt / _tiltMax).clamp(0, 1);
@@ -152,7 +158,7 @@ class LumiBrain extends ChangeNotifier {
   /// Where Lumi's light lands on the page and how bright it is.
   Offset poolPos = Offset.zero;
   double poolStrength = 0;
-  static const _tiltMax = 0.64;
+  static const _tiltMax = 0.82;
 
   /// Tips the page back and lets Lumi hop down the feed from card to card,
   /// each one dipping and lighting up as it lands, then hop back up to the
@@ -697,10 +703,11 @@ class LumiBrain extends ChangeNotifier {
       final tout = Curves.easeInOutCubic.transform(((f - _flyEnd - 0.3) / 1.5).clamp(0, 1));
       final k = tin - tout;
       pageTilt = _tiltMax * k;
-      pageLift = 60 * k;
-      pagePush = 100 * k;
-      // The page turns a little towards wherever Lumi is.
-      final yawTo = -0.2 * ((_pos.dx - s.size.width / 2) / (s.size.width / 2)) * k;
+      pageLift = 30 * k;
+      pagePush = 210 * k;
+      // The page is turned a little so its left edge and the slabs' sides
+      // show, and turns a little more towards wherever Lumi is.
+      final yawTo = (0.07 - 0.12 * ((_pos.dx - s.size.width / 2) / (s.size.width / 2))) * k;
       pageYaw += (yawTo - pageYaw) * (1 - math.exp(-dt * 2));
       _scaleTarget = 1 - 0.4 * k;
 
@@ -710,7 +717,7 @@ class LumiBrain extends ChangeNotifier {
       final header = home + Offset(0, _footLength(r) * s.ppu * _scale);
       (Offset, double) stop(int i) {
         if (i < 0 || _stops[i].$2 < 0) return (header, 0.0);
-        return (_stops[i].$1, -_slab * k);
+        return (_stops[i].$1, -slabHeight(_stops[i].$2) / s.ppu * k);
       }
 
       var lift = 0.0, lean = 0.0;
