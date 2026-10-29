@@ -32,6 +32,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   final scroll = ScrollController();
   final search = TextEditingController();
   final waitKey = GlobalKey();
+  final pageKey = GlobalKey();
+  final slabKeys = List.generate(9, (_) => GlobalKey());
   String query = '';
   bool wardrobe = false;
   bool paused = false;
@@ -43,6 +45,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     super.initState();
     brain.init();
     brain.addListener(_onBrain);
+    brain.cardRects = _cardRects;
+  }
+
+  /// The feed cards' rects on the page, for Lumi to hop between.
+  List<Rect?> _cardRects() {
+    final page = pageKey.currentContext?.findRenderObject() as RenderBox?;
+    return [
+      for (final k in slabKeys)
+        switch (k.currentContext?.findRenderObject()) {
+          final RenderBox b when page != null && b.attached && b.hasSize =>
+            b.localToGlobal(Offset.zero, ancestor: page) & b.size,
+          _ => null,
+        },
+    ];
   }
 
   void _onBrain() => setState(() {});
@@ -141,6 +157,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           final friendName = brain.rig?.style.name ?? 'Lumi';
 
           return Stack(
+            key: pageKey,
             children: [
               // The page itself: everything here tips back into 3D together
               // during Lumi's fly-over.
@@ -173,6 +190,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                 padding: const EdgeInsets.fromLTRB(14, 4, 14, 40),
                                 children: [
                                   _Slab(
+                                    key: slabKeys[0],
+                                    index: 0,
                                     brain: brain,
                                     radius: 12,
                                     child: SearchBox(controller: search, onChanged: (v) => setState(() => query = v)),
@@ -182,6 +201,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     SearchResults(query: query)
                                   else ...[
                                     _Slab(
+                                      key: slabKeys[1],
+                                      index: 1,
                                       brain: brain,
                                       child: FireworksCard(
                                         t: clock,
@@ -191,21 +212,29 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     ),
                                     const SizedBox(height: 12),
                                     _Slab(
+                                      key: slabKeys[2],
+                                      index: 2,
                                       brain: brain,
                                       child: RewardCard(brain: brain, onCollect: _collect),
                                     ),
                                     const SizedBox(height: 12),
                                     _Slab(
+                                      key: slabKeys[3],
+                                      index: 3,
                                       brain: brain,
                                       child: WeatherCard(brain: brain),
                                     ),
                                     const SizedBox(height: 12),
                                     _Slab(
+                                      key: slabKeys[4],
+                                      index: 4,
                                       brain: brain,
                                       child: PhotoBoothCard(onTap: _photo, friendName: friendName),
                                     ),
                                     const SizedBox(height: 12),
                                     _Slab(
+                                      key: slabKeys[5],
+                                      index: 5,
                                       brain: brain,
                                       child: PlayCard(
                                         t: clock,
@@ -227,6 +256,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     ),
                                     const SizedBox(height: 12),
                                     _Slab(
+                                      key: slabKeys[6],
+                                      index: 6,
                                       brain: brain,
                                       child: ParkMapCard(
                                         friendName: friendName,
@@ -235,11 +266,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     ),
                                     const SizedBox(height: 12),
                                     _Slab(
+                                      key: slabKeys[7],
+                                      index: 7,
                                       brain: brain,
                                       child: WaitTimesCard(key: waitKey, highlight: highlightRide),
                                     ),
                                     const SizedBox(height: 12),
-                                    _Slab(brain: brain, child: const DiningCard()),
+                                    _Slab(key: slabKeys[8], index: 8, brain: brain, child: const DiningCard()),
                                   ],
                                 ],
                               ),
@@ -308,7 +341,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     ),
                   ),
                 ),
-              if (brain.ready && !paused) Positioned.fill(child: IgnorePointer(child: _NoteOverlay(brain: brain))),
+              if (brain.ready && !paused)
+                Positioned.fill(
+                  child: IgnorePointer(child: _NoteOverlay(brain: brain)),
+                ),
               Positioned.fill(
                 child: IgnorePointer(child: CustomPaint(painter: LumiAuraPainter(brain, front: true))),
               ),
@@ -433,7 +469,8 @@ class _TopBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          // Tapping the wordmark sends Lumi on a fly-over of the page.
+          // Tapping the wordmark tips the page back and sends Lumi hopping
+          // over the cards.
           GestureDetector(
             onTap: brain.flyover,
             child: Text('Parkday', style: Pd.t(14.5, w: FontWeight.w700)),
@@ -701,12 +738,14 @@ class _PageTilt extends StatelessWidget {
 /// The slab's sides are a few stacked copies of its outline, and the card
 /// itself rides on top; flat, it is just the card.
 class _Slab extends StatelessWidget {
-  const _Slab({required this.brain, required this.child, this.radius = 14});
+  const _Slab({super.key, required this.brain, required this.index, required this.child, this.radius = 14});
   final LumiBrain brain;
+  final int index;
   final Widget child;
   final double radius;
 
-  static const _depth = 16.0, _layers = 5;
+  // How thick the slab stands, and how far Lumi's landing pushes it in.
+  static const _depth = 16.0, _dip = 9.0, _layers = 5;
 
   @override
   Widget build(BuildContext context) {
@@ -715,6 +754,7 @@ class _Slab extends StatelessWidget {
       child: child,
       builder: (context, _, child) {
         final k = brain.tiltAmount;
+        final press = brain.cardPress[index] ?? 0;
         final r = BorderRadius.circular(radius);
         Matrix4 up(double z) => Matrix4.translationValues(0, 0, -z);
         return Stack(
@@ -748,7 +788,28 @@ class _Slab extends StatelessWidget {
                   ),
                 ),
             ],
-            Transform(key: const ValueKey('card'), transform: up(_depth * k), child: child),
+            // The card on top dips and lights up where Lumi lands on it.
+            Transform(
+              key: const ValueKey('card'),
+              transform: up((_depth - _dip * press) * k),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: r,
+                  boxShadow: [
+                    BoxShadow(color: const Color(0xFF6FA8FF).withValues(alpha: 0.5 * press * k), blurRadius: 22),
+                  ],
+                ),
+                position: DecorationPosition.background,
+                child: DecoratedBox(
+                  position: DecorationPosition.foreground,
+                  decoration: BoxDecoration(
+                    borderRadius: r,
+                    border: Border.all(color: const Color(0xFFBFE0FF).withValues(alpha: 0.85 * press * k), width: 1.5),
+                  ),
+                  child: child,
+                ),
+              ),
+            ),
           ],
         );
       },

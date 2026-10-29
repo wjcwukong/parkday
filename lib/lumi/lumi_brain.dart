@@ -123,8 +123,28 @@ class LumiBrain extends ChangeNotifier {
   /// page brought up and in so the header stays near the top.
   double pageYaw = 0, pageLift = 0, pagePush = 0;
   double _flyT = -1;
-  double _hover = 0; // Lumi's height off the page, in world units (-Z)
   bool get flying => _flyT >= 0;
+
+  /// The feed cards' rects on the flat page, by index (null when a card is
+  /// not on screen), for Lumi to hop between. Set by the home page.
+  List<Rect?> Function()? cardRects;
+
+  /// How far each card is pressed in by Lumi landing on it, by index,
+  /// springing back to 0.
+  final cardPress = <int, double>{};
+
+  // The hops: where Lumi's feet land on the page and on which card (-1 is
+  // the header, where it floats), the hop under way and the time into it,
+  // and when the page starts to tip back.
+  final _stops = <(Offset, int)>[];
+  int _leg = 0;
+  double _legT = 0, _flyEnd = double.infinity;
+  Offset _feet = Offset.zero; // on the page
+  bool _landed = false;
+  double _hopLift = 0, _hopLean = 0;
+  double _hopUp = 0; // how high Lumi is in its hop, in world units up the screen
+  double _feetZ = 0; // off the page, in world units (-Z)
+  static const _crouch = 0.16, _land = 0.2, _dwell = 0.3, _slab = 0.16;
 
   /// How far into the fly-over tilt the page is, 0 (flat) to 1.
   double get tiltAmount => (pageTilt / _tiltMax).clamp(0, 1);
@@ -132,12 +152,31 @@ class LumiBrain extends ChangeNotifier {
   /// Where Lumi's light lands on the page and how bright it is.
   Offset poolPos = Offset.zero;
   double poolStrength = 0;
-  static const _flyLen = 9.0, _tiltMax = 0.64;
+  static const _tiltMax = 0.64;
 
-  /// Tips the page back and lets Lumi glide down over the feed, lighting
-  /// up the cards it passes, then sets everything back.
+  /// Tips the page back and lets Lumi hop down the feed from card to card,
+  /// each one dipping and lighting up as it lands, then hop back up to the
+  /// header and set everything back.
   void flyover() {
     if (flying || asleep || away || space == null || notes.isNotEmpty) return;
+    final view = scrollRect.deflate(8);
+    final cards = <(Rect, int)>[];
+    final rects = cardRects?.call() ?? const [];
+    for (var i = 0; i < rects.length; i++) {
+      final r = rects[i];
+      if (r == null || r.height < 50 || r.top < view.top || r.bottom > view.bottom) continue;
+      cards.add((r, i));
+    }
+    _stops.clear();
+    var side = 0.3;
+    for (final (r, i) in cards.take(4)) {
+      _stops.add((Offset(r.left + r.width * (side + _rnd.nextDouble() * 0.08), r.center.dy + 6), i));
+      side = 1 - side - 0.08;
+    }
+    _stops.add((Offset.zero, -1));
+    _leg = 0;
+    _legT = 0;
+    _flyEnd = double.infinity;
     _flyT = 0;
     _setStatus('Lumi is exploring the page', 999);
     notifyListeners();
@@ -369,20 +408,12 @@ class LumiBrain extends ChangeNotifier {
     fx?.shockwave(_world(_pos, -0.7), style.rim * 0.6 + style.tint * 0.4);
   }
 
-  /// A Catmull-Rom spline through [pts] at [u] in 0..1.
-  static Offset _catmull(List<Offset> pts, double u) {
-    final n = pts.length - 1;
-    final x = (u * n).clamp(0.0, n - 1e-6);
-    final i = x.floor();
-    final t = x - i;
-    Offset p(int k) => pts[k.clamp(0, n)];
-    final p0 = p(i - 1), p1 = p(i), p2 = p(i + 1), p3 = p(i + 2);
-    final t2 = t * t, t3 = t2 * t;
-    return (p1 * 2 + (p2 - p0) * t + (p0 * 2 - p1 * 5 + p2 * 4 - p3) * t2 + (p1 * 3 - p0 - p2 * 3 + p3) * t3) * 0.5;
-  }
-
   /// Lumi's spot in the overlay scene, nudged towards the camera by [z].
   vm.Vector3 _world(Offset p, [double z = 0]) => space?.toWorld(p, z) ?? vm.Vector3.zero();
+
+  /// From the middle of Lumi's head down to the bottom of its body, in
+  /// world units at scale 1.
+  static double _footLength(LumiRig r) => r.style.headRadius + r.style.bodyRadius * 1.62;
 
   void setHat(Hat h) {
     hat = h;
@@ -663,7 +694,7 @@ class LumiBrain extends ChangeNotifier {
       _flyT += dt;
       final f = _flyT;
       final tin = Curves.easeInOutCubic.transform((f / 1.5).clamp(0, 1));
-      final tout = Curves.easeInOutCubic.transform(((f - (_flyLen - 1.5)) / 1.5).clamp(0, 1));
+      final tout = Curves.easeInOutCubic.transform(((f - _flyEnd - 0.3) / 1.5).clamp(0, 1));
       final k = tin - tout;
       pageTilt = _tiltMax * k;
       pageLift = 60 * k;
@@ -672,27 +703,88 @@ class LumiBrain extends ChangeNotifier {
       final yawTo = -0.2 * ((_pos.dx - s.size.width / 2) / (s.size.width / 2)) * k;
       pageYaw += (yawTo - pageYaw) * (1 - math.exp(-dt * 2));
       _scaleTarget = 1 - 0.4 * k;
-      // A loop down over the feed and back up to the header.
-      final w = s.size.width, top = scrollRect.top;
-      final path = [
-        home,
-        Offset(w * 0.42, top + 20),
-        Offset(w * 0.72, top + 150),
-        Offset(w * 0.34, top + 290),
-        Offset(w * 0.6, top + 90),
-        home,
-      ];
-      final u = Curves.easeInOutSine.transform(((f - 0.9) / (_flyLen - 2.4)).clamp(0, 1));
-      target = _catmull(path, u);
-      final lift = math.sin(math.pi * u);
-      _hover += (-1.15 * lift - _hover) * (1 - math.exp(-dt * 4));
-      poolPos = _pos;
-      poolStrength = (lift * 1.6).clamp(0, 1) * (tin - tout);
-      if (f >= _flyLen) {
+
+      // Hop from stop to stop once the page is most of the way back: crouch,
+      // a ballistic arc up off the page, then squash on landing and spring
+      // back while the card dips under it.
+      final header = home + Offset(0, _footLength(r) * s.ppu * _scale);
+      (Offset, double) stop(int i) {
+        if (i < 0 || _stops[i].$2 < 0) return (header, 0.0);
+        return (_stops[i].$1, -_slab * k);
+      }
+
+      var lift = 0.0, lean = 0.0;
+      var standingOn = -1;
+      if (f < 1.1) {
+        _feet = header;
+        _feetZ = 0;
+      } else if (_leg >= _stops.length) {
+        _feet = header;
+        _feetZ = 0;
+      } else {
+        _legT += dt;
+        final (p0, z0) = stop(_leg - 1);
+        final (p1, z1) = stop(_leg);
+        final dist = (p1 - p0).distance / s.ppu;
+        final air = 0.42 + 0.08 * dist;
+        final height = 0.85 + 0.22 * dist;
+        final t = _legT;
+        if (t < _crouch) {
+          _feet = p0;
+          _feetZ = z0;
+          standingOn = _leg > 0 ? _stops[_leg - 1].$2 : -1;
+          r.squashY = 0.72;
+        } else if (t < _crouch + air) {
+          final u = (t - _crouch) / air;
+          final e = u * 0.7 + Curves.easeInOutSine.transform(u) * 0.3;
+          _feet = Offset.lerp(p0, p1, e)!;
+          lift = 4 * u * (1 - u);
+          _feetZ = z0 + (z1 - z0) * e;
+          _hopUp = height * lift;
+          // Stretch on the way up, round at the top, stretch into the fall.
+          r.squashY = u < 0.5 ? 1.18 - 0.36 * u : 1.0 + 0.24 * (u - 0.5);
+          lean = ((p1.dx - p0.dx) / s.size.width).clamp(-1.0, 1.0) * -0.35 * (1 - u);
+        } else {
+          final card = _stops[_leg].$2;
+          if (!_landed) {
+            _landed = true;
+            r.squashY = 0.68;
+            if (card >= 0) cardPress[card] = 1;
+          }
+          _feet = p1;
+          _feetZ = z1;
+          standingOn = card;
+          final since = t - _crouch - air;
+          if (since > 0.08) r.squashY = since < _land ? 1.07 : 1.0;
+          final last = _leg == _stops.length - 1;
+          if (since >= _land + (last ? 0 : _dwell)) {
+            _leg++;
+            _legT = 0;
+            _landed = false;
+            if (_leg == _stops.length) _flyEnd = f;
+          }
+        }
+      }
+      if (lift == 0) _hopUp = 0;
+      _hopLift = lift;
+      _hopLean = lean;
+      // Cards spring back up, but stay a little pressed under Lumi.
+      for (final i in cardPress.keys.toList()) {
+        final rest = i == standingOn ? 0.35 : 0.0;
+        cardPress[i] = rest + (cardPress[i]! - rest) * math.exp(-dt * 7);
+      }
+      target = _feet;
+      poolPos = _feet;
+      final hopping = f >= 1.1 && _leg < _stops.length;
+      poolStrength = hopping ? k * (1 - 0.6 * lift) : poolStrength * math.exp(-dt * 6);
+      if (f >= _flyEnd + 1.8) {
         _flyT = -1;
         pageTilt = pageYaw = pageLift = pagePush = 0;
-        _hover = 0;
+        _hopLift = _hopLean = _hopUp = 0;
         poolStrength = 0;
+        cardPress.clear();
+        _pos = home;
+        _vel = Offset.zero;
         _setStatus('That was fun!', 2.5);
         notifyListeners();
       }
@@ -713,7 +805,7 @@ class LumiBrain extends ChangeNotifier {
     }
     final idleBob = Offset(0, math.sin(_t * 1.6) * 6 * (asleep ? 0.6 : 1));
     final sway = Offset(math.sin(_t * 0.5) * 4, 0);
-    var goal = target + (riding ? Offset.zero : idleBob + sway);
+    var goal = target + (riding || flying ? Offset.zero : idleBob + sway);
 
     // Eating: lean toward the note being eaten.
     ParkNote? active;
@@ -730,6 +822,7 @@ class LumiBrain extends ChangeNotifier {
     final acc = (goal - _pos) * stiffness - _vel * damping;
     _vel += acc * dt;
     _pos += _vel * dt;
+    if (flying) _pos = goal; // the hops are already the motion
     _scale += (_scaleTarget - _scale) * (1 - math.exp(-dt * (_swapT > 0 ? 18 : 8)));
 
     // ---------- notes ----------
@@ -771,9 +864,10 @@ class LumiBrain extends ChangeNotifier {
       hands = math.max(hands, 0.55);
       gaze = vm.Vector2(gaze.x * 0.3, 0.8);
     }
-    if (flying && _hover < -0.3) {
+    if (flying) {
       face = Face.happy;
-      hands = 0.7;
+      hands = 0.25 + 0.6 * _hopLift;
+      tilt = _hopLean;
       gaze = vm.Vector2(0, 0.6);
     }
     if (_starryT > 0) face = Face.starry;
@@ -810,8 +904,16 @@ class LumiBrain extends ChangeNotifier {
       ..handsUp = hands;
     r.update(dt);
 
-    // place in 3D
-    r.root.position = s.toWorld(_pos) + vm.Vector3(0, 0, _hover);
+    // Place in 3D. Turned against the page's tilt so Lumi stays upright
+    // and facing us while the page tips back; while hopping, stood with its
+    // feet on the card (or the header) instead of centred on _pos.
+    final turn = vm.Quaternion.fromRotation(
+      (vm.Matrix4.rotationX(-pageTilt)..multiply(vm.Matrix4.rotationY(-pageYaw))).getRotation(),
+    );
+    r.root.rotation = turn;
+    r.root.position = flying
+        ? s.toWorld(_feet) + vm.Vector3(0, 0, _feetZ) + turn.rotated(vm.Vector3(0, _footLength(r) * _scale + _hopUp, 0))
+        : s.toWorld(_pos);
     r.root.scale = vm.Vector3.all(_scale.clamp(0.001, 2));
 
     sparks?.node.visible = ambientSparks;
@@ -942,7 +1044,7 @@ class LumiBrain extends ChangeNotifier {
     final (at, depth, yaw, pitch, roll, size) = pose;
     n.pos = at;
     card.node
-      ..position = _world(at, depth) + vm.Vector3(0, 0, _hover)
+      ..position = _world(at, depth)
       ..rotation =
           vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), yaw) *
           vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), -pitch) *
