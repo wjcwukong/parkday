@@ -286,10 +286,7 @@ class _SkyLiftGameState extends State<SkyLiftGame> {
                     onDone: () => Navigator.pop(context),
                   ),
                 if (paused && !over)
-                  GamePausedCard(
-                    onResume: () => setState(() => paused = false),
-                    onQuit: () => Navigator.pop(context),
-                  ),
+                  GamePausedCard(onResume: () => setState(() => paused = false), onQuit: () => Navigator.pop(context)),
               ],
             ),
           );
@@ -327,10 +324,7 @@ class _SkyPainter extends CustomPainter {
       if (f > 0.35) {
         final rnd = math.Random(8);
         for (var i = 0; i < 80; i++) {
-          final p = Offset(
-            rnd.nextDouble() * size.width,
-            (rnd.nextDouble() * size.height + g.alt * 0.3) % size.height,
-          );
+          final p = Offset(rnd.nextDouble() * size.width, (rnd.nextDouble() * size.height + g.alt * 0.3) % size.height);
           canvas.drawCircle(
             p,
             0.6 + rnd.nextDouble(),
@@ -338,7 +332,6 @@ class _SkyPainter extends CustomPainter {
           );
         }
       }
-      // the moon
       final my = g.screenYFor(_moonAlt + 70);
       if (my > -300) {
         final mc = Offset(size.width * 0.5, my);
@@ -377,9 +370,8 @@ class _SkyPainter extends CustomPainter {
             5,
             Paint()
               ..blendMode = BlendMode.plus
-              ..shader = RadialGradient(
-                colors: [const Color(0x88FFE2A8), const Color(0x00FFE2A8)],
-              ).createShader(Rect.fromCircle(center: p, radius: 5)),
+              ..shader = RadialGradient(colors: [const Color(0x88FFE2A8), const Color(0x00FFE2A8)])
+                  .createShader(Rect.fromCircle(center: p, radius: 5)),
           );
         }
       }
@@ -412,9 +404,8 @@ class _SkyPainter extends CustomPainter {
         26,
         Paint()
           ..blendMode = BlendMode.plus
-          ..shader = RadialGradient(
-            colors: [Color.fromRGBO(255, 220, 170, 0.6 * k), const Color(0x00FFB070)],
-          ).createShader(Rect.fromCircle(center: base, radius: 26)),
+          ..shader = RadialGradient(colors: [Color.fromRGBO(255, 220, 170, 0.6 * k), const Color(0x00FFB070)])
+              .createShader(Rect.fromCircle(center: base, radius: 26)),
       );
     }
 
@@ -423,20 +414,59 @@ class _SkyPainter extends CustomPainter {
     final band1 = ((g.alt + size.height / _ppm) / 40).ceil() + 1;
     for (var b = math.max(0, band0); b <= band1; b++) {
       final rnd = math.Random(b * 31 + 7);
-      for (var k = 0; k < 2; k++) {
-        final isFront = rnd.nextDouble() < 0.35;
+      for (var k = 0; k < 3; k++) {
+        final isFront = rnd.nextDouble() < 0.3;
         final cx = rnd.nextDouble() * size.width;
         final ca = b * 40.0 + rnd.nextDouble() * 40;
         final scale = 0.7 + rnd.nextDouble() * 0.9;
-        if (isFront != front) continue;
+        // Some are long banks of billows rather than single puffs.
+        final wide = 1 + rnd.nextDouble() * rnd.nextDouble() * 1.6;
+        if (isFront != front || (isFront && ca < 70)) continue;
         final y = g.screenYFor(ca) + (front ? 0 : 0);
         final drift = math.sin(g.t * 0.3 + b) * 14;
         final col = Color.lerp(
-          const Color(0xFFF7DDEE),
+          const Color(0xFFEFCDE8),
           const Color(0xFFB79AE0),
           f,
         )!.withValues(alpha: front ? 0.94 : 1.0);
-        _cloud(canvas, Offset(cx + drift, y), scale * (front ? 1.25 : 1), col);
+        _cloud(canvas, Offset(cx + drift, y), scale * (front ? 1.25 : 1), col, wide);
+      }
+    }
+
+    // The moon, far off from the start: peeking out over the far clouds,
+    // growing as Lumi climbs, with a soft halo of moonlight. The near moon
+    // takes over at the top.
+    if (!front) {
+      final my = g.screenYFor(_moonAlt + 70);
+      final far = ((-my - 300) / 300).clamp(0.0, 1.0);
+      if (far > 0) {
+        final fc = Offset(size.width * 0.7, size.height * (0.2 - 0.06 * f));
+        final fr = 34 + 56 * f;
+        final halo = Rect.fromCircle(center: fc, radius: fr * 3.4);
+        canvas.drawCircle(
+          fc,
+          fr * 3.4,
+          Paint()
+            ..shader = RadialGradient(
+              colors: [
+                const Color(0xFFFFF3DA).withValues(alpha: 0.55 * far),
+                const Color(0xFFFFD9C2).withValues(alpha: 0.18 * far),
+                const Color(0x00FFD9C2),
+              ],
+              stops: const [0, 0.35, 1],
+            ).createShader(halo),
+        );
+        canvas.drawCircle(fc, fr, Paint()..color = const Color(0xFFFFF6E6).withValues(alpha: far));
+        canvas.drawCircle(
+          fc + Offset(-0.3, -0.2) * fr,
+          0.18 * fr,
+          Paint()..color = Color.fromRGBO(184, 168, 150, 0.16 * far),
+        );
+        canvas.drawCircle(
+          fc + Offset(0.28, 0.3) * fr,
+          0.24 * fr,
+          Paint()..color = Color.fromRGBO(184, 168, 150, 0.12 * far),
+        );
       }
     }
 
@@ -485,9 +515,7 @@ class _SkyPainter extends CustomPainter {
         tp.paint(canvas, Offset(p.x * size.width + 20, g.screenYFor(p.alt) - 30 - p.age * 30));
       }
       if (g.moon && g.moonT < 6) {
-        final double a = (g.moonT < 0.5 ? g.moonT / 0.5 : (g.moonT > 5 ? 6 - g.moonT : 1.0))
-            .clamp(0.0, 1.0)
-            .toDouble();
+        final double a = (g.moonT < 0.5 ? g.moonT / 0.5 : (g.moonT > 5 ? 6 - g.moonT : 1.0)).clamp(0.0, 1.0).toDouble();
         final tp = TextPainter(
           textAlign: TextAlign.center,
           text: TextSpan(
@@ -524,10 +552,7 @@ class _SkyPainter extends CustomPainter {
           final st = k * 0.8;
           final age = g.moonT - st;
           if (age < 0 || age > 1.6) continue;
-          final c = Offset(
-            size.width * (0.15 + rnd.nextDouble() * 0.7),
-            size.height * (0.25 + rnd.nextDouble() * 0.3),
-          );
+          final c = Offset(size.width * (0.15 + rnd.nextDouble() * 0.7), size.height * (0.25 + rnd.nextDouble() * 0.3));
           final col = [const Color(0xFF9BE7FF), const Color(0xFFFF9BD2), const Color(0xFFFFE08A)][k % 3];
           for (var i = 0; i < 40; i++) {
             final ang = i / 40 * math.pi * 2;
@@ -546,9 +571,11 @@ class _SkyPainter extends CustomPainter {
   /// A cumulus: a heap of puffs, each lit from the upper left and shaded
   /// lilac underneath, on a flat, darker base, so it reads as a soft 3D
   /// lump like the original's clouds rather than a flat cut-out.
-  void _cloud(Canvas canvas, Offset c, double s, Color col) {
-    final shadow = Color.lerp(col, const Color(0xFF9C7CC4), 0.5)!;
-    final light = Color.lerp(col, Colors.white, 0.5)!;
+  /// A cloud of overlapping billows, [wide] times as long as it is tall,
+  /// lavender in the shade above and warmed from below by the sunset.
+  void _cloud(Canvas canvas, Offset c, double s, Color col, [double wide = 1]) {
+    final shadow = Color.lerp(col, const Color(0xFF7E62B8), 0.65)!;
+    final light = Color.lerp(col, const Color(0xFFFFE6DA), 0.6)!;
     const puffs = [
       (-58.0, 14.0, 22.0),
       (58.0, 12.0, 24.0),
@@ -558,23 +585,27 @@ class _SkyPainter extends CustomPainter {
       (20.0, -22.0, 30.0),
       (0.0, 16.0, 30.0),
     ];
-    // the flat underside in shadow
-    final base = Rect.fromCenter(center: c + Offset(0, 26) * s, width: 150 * s, height: 30 * s);
-    canvas.drawOval(base, Paint()..color = shadow.withValues(alpha: shadow.a * 0.9));
-    for (final (dx, dy, r) in puffs) {
-      final pc = c + Offset(dx, dy) * s;
-      final rect = Rect.fromCircle(center: pc, radius: r * s);
-      canvas.drawCircle(
-        pc,
-        r * s,
-        Paint()
-          ..shader = RadialGradient(
-            center: const Alignment(-0.35, -0.5),
-            radius: 1.1,
-            colors: [light, col, shadow],
-            stops: const [0, 0.45, 1],
-          ).createShader(rect),
-      );
+    // the flat underside, catching the warm light
+    final base = Rect.fromCenter(center: c + Offset(0, 26) * s, width: 150 * s * wide, height: 30 * s);
+    canvas.drawOval(base, Paint()..color = light.withValues(alpha: light.a * 0.95));
+    final copies = wide > 1.4 ? 2 : 1;
+    for (var n = 0; n < copies; n++) {
+      final shift = copies == 1 ? 0.0 : (n - 0.5) * 75 * (wide - 0.6);
+      for (final (dx, dy, r) in puffs) {
+        final pc = c + Offset(dx * (copies == 1 ? wide : 1) + shift, dy) * s;
+        final rect = Rect.fromCircle(center: pc, radius: r * s);
+        canvas.drawCircle(
+          pc,
+          r * s,
+          Paint()
+            ..shader = RadialGradient(
+              center: const Alignment(-0.25, 0.55),
+              radius: 1.15,
+              colors: [light, col, shadow],
+              stops: const [0, 0.5, 1],
+            ).createShader(rect),
+        );
+      }
     }
   }
 
