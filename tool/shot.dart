@@ -117,7 +117,8 @@ class _ShotAppState extends State<_ShotApp> {
           child: RepaintBoundary(
             key: boundary,
             child: MediaQuery(
-              data: MediaQueryData(size: _phone, devicePixelRatio: 2),
+              // Keep the device's safe-area padding, so it matches on a phone.
+              data: MediaQueryData.fromView(View.of(context)).copyWith(size: _phone, devicePixelRatio: 2),
               child: MaterialApp(
                 debugShowCheckedModeBanner: false,
                 theme: Pd.theme(),
